@@ -1,103 +1,105 @@
 # herdr-lazygit
 
-在 [herdr](https://herdr.dev) 里一键打开 [lazygit](https://github.com/jesseduffield/lazygit) 的插件,并内置 AI 生成 commit message 的自定义命令。
+[中文文档](README.zh-CN.md)
 
-- 分屏或独立 tab 打开 lazygit,自动定位到当前聚焦 pane 的目录
-- 幂等启动:重复触发时自动 聚焦 / 收起,不会开出一堆重复 pane
-- 按 `C` 让 AI 读取 staged diff,生成 3 个 conventional commit 候选,选一个直接提交
-- 按 `B` 在多个 AI CLI 后端(claude / codex / opencode / gemini)之间切换
+A [herdr](https://herdr.dev) plugin that summons [lazygit](https://github.com/jesseduffield/lazygit) with one keypress, with built-in AI commit message generation.
 
-## 安装
+- Opens lazygit in a split pane or its own tab, in the directory of your currently focused pane
+- Idempotent launcher: triggering again focuses / toggles the existing pane instead of stacking duplicates
+- Press `C` to have an AI read your staged diff and propose 3 conventional-commit candidates — pick one to commit
+- Press `B` to switch between AI CLI backends (claude / codex / opencode / gemini)
 
-前置要求:herdr >= 0.7.0;lazygit 会在安装插件时自动检测,缺失时通过 Homebrew 安装。
+## Install
+
+Requires herdr >= 0.7.0. lazygit is detected at install time and installed via Homebrew if missing.
 
 ```sh
-# 从 GitHub 安装(herdr 接受 <owner>/<repo>[/subdir] 短格式,可选 --ref 指定分支/标签)
+# Install from GitHub (herdr accepts the <owner>/<repo>[/subdir] short form, optional --ref)
 herdr plugin install <owner>/<repo>
 
-# 或者本地开发时软链
+# Or link a local checkout during development
 herdr plugin link /path/to/herdr-lazygit
 ```
 
-推荐在 herdr 的 `config.toml` 中加一个快捷键(注意:请自己手动加,格式如下):
+Then add keybindings to your herdr `config.toml` (add them manually):
 
 ```toml
-[[keys.command]]              # lazygit:分屏打开
+[[keys.command]]              # lazygit: open in a split
 key = "prefix+g"
 type = "shell"
 command = "herdr plugin action invoke open --plugin herdr-lazygit"
 
-[[keys.command]]              # lazygit:独立 tab 打开
+[[keys.command]]              # lazygit: open in its own tab
 key = "prefix+shift+g"
 type = "shell"
 command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
 ```
 
-之后 `prefix+g` 的行为:未打开 → 分屏打开;已打开但未聚焦 → 聚焦;已聚焦 → 收起。
+`prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
 
-> **注意(herdr 平台行为)**:action 的上下文永远取自 herdr 当前 **UI 聚焦**的 pane,而不是发起调用的进程。如果从后台 pane 或脚本里执行 `herdr plugin action invoke …`,lazygit 会开在用户当前聚焦的 tab 里、紧挨其聚焦 pane,cwd 也取自那个 pane,并且会夺走焦点。请只通过前台键位绑定触发这两个 action,避免程序化/后台调用。
+> **Note (herdr platform behavior):** an action's context always resolves from the pane that currently has **UI focus**, not from the process that invoked it. Invoking `herdr plugin action invoke …` from a background pane or script opens lazygit next to whatever the user is focused on, takes its cwd from that pane, and steals focus. Only trigger these actions through foreground keybindings.
 
-## 键位速查
+## Key reference
 
-前两个是本插件新增的自定义命令,其余是 lazygit 自带常用键位(完整列表在 lazygit 里按 `?` 查看):
+The first two are custom commands added by this plugin; the rest are common lazygit defaults (press `?` inside lazygit for the full list):
 
-| 键 | 面板 | 作用 |
+| Key | Panel | Action |
 | --- | --- | --- |
-| `C` | 文件 | **AI 生成 commit message**:读取 staged diff,弹出候选菜单,回车即提交(覆盖了 files 面板默认的「用 git editor 提交」) |
-| `B` | 全局* | **切换 AI 后端**:列出已检测到的 AI CLI,选中即生效 |
-| `空格` | 文件 | stage / unstage 当前文件 |
-| `d` | 文件 | 丢弃当前文件的改动 |
-| `o` | 文件 | 用系统默认程序打开文件 |
-| `e` | 文件 | 用编辑器打开文件 |
-| `f` | 文件 | fetch |
-| `p` | 全局 | pull |
-| `P` | 全局 | push |
-| `z` | 全局 | 撤销上一步操作(基于 reflog) |
-| `?` | 全局 | 打开键位帮助菜单 |
+| `C` | Files | **AI commit message**: reads the staged diff, pops a candidate menu, Enter commits (overrides the files panel's default "commit using git editor") |
+| `B` | Global* | **Switch AI backend**: lists detected AI CLIs, select to activate |
+| `Space` | Files | Stage / unstage the selected file |
+| `d` | Files | Discard changes to the selected file |
+| `o` | Files | Open file with the OS default app |
+| `e` | Files | Open file in your editor |
+| `f` | Files | Fetch |
+| `p` | Global | Pull |
+| `P` | Global | Push |
+| `z` | Global | Undo the last operation (reflog-based) |
+| `?` | Global | Open the keybinding help menu |
 
-\* `B` 的「全局」有一个例外:lazygit 中**面板级默认键位优先于 global 自定义命令**。在 commits 面板按 `B` 触发的是 lazygit 默认的「标记 rebase base commit」(有实际副作用,commit 行会出现 ↑↑↑ 标记,可再按一次 `B` 选 Reset 取消),不会弹出 AI 后端菜单。请在 files 等没有 `B` 默认键位的面板使用。同理,`C` 是对 files 面板默认键位(用 git editor 提交)的覆盖;如仍需要该功能,可在用户覆盖层给它绑定其他键。
+\* One caveat about `B` being "global": in lazygit, **panel-level default keybindings take precedence over global custom commands**. In the commits panel, `B` triggers lazygit's default "mark commit as rebase base" (which has real side effects — the commit rows gain ↑↑↑ markers; press `B` again and choose Reset to undo) instead of the AI backend menu. Use `B` from the files panel or any panel without a conflicting default. Likewise, `C` overrides the files panel's default "commit using git editor"; rebind it in your user override layer if you still need that.
 
-### 使用 `C`(AI commit)的注意事项
+### Using `C` (AI commit)
 
-- 先用 `空格` stage 好要提交的文件,再按 `C`。
-- 候选菜单弹出前会调用 AI CLI,可能需要几秒钟。
-- 如果没有 staged 改动、没有可用的 AI 后端、或生成超时,菜单里会显示一条以 `(` 开头的中文提示行;选中这类提示行**不会**真的执行 commit,只会把提示回显到 command log,可放心回车关闭。
-- 生成的 message 为 conventional commit 格式(`feat:` / `fix:` / `chore:` …),英文,单行。
+- Stage the files you want to commit with `Space` first, then press `C`.
+- The candidate menu calls the AI CLI before it opens — expect a few seconds.
+- With nothing staged, no usable backend, or a generation timeout, the menu shows a hint line starting with `(`; selecting such a line does **not** commit — it just echoes the hint to the command log, so pressing Enter to dismiss it is safe.
+- Generated messages are single-line, English, conventional-commit style (`feat:` / `fix:` / `chore:` …).
 
-## AI 后端配置
+## AI backend configuration
 
-`C` 命令依赖任意一个已安装的 AI CLI:`claude`、`codex`、`opencode`、`gemini`。
+The `C` command relies on any one of these installed AI CLIs: `claude`, `codex`, `opencode`, `gemini`.
 
-- 默认 `auto` 模式,按 `claude > codex > opencode > gemini` 的顺序自动探测第一个可用的。
-- 在 lazygit 里按 `B` 可以查看各后端状态(`detected` / `missing` / `current`)并切换。`detected` 只代表 CLI 已安装,不保证已登录/有使用资格;若生成失败,提示行会带上后端名和一行 stderr 摘要(例如 gemini 的 `IneligibleTierError`),按提示处理登录问题或按 `B` 换后端。
-- 配置持久化在 `$HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf`(shell 可 source 格式),也可以手动编辑:
+- Default mode is `auto`: the first available backend wins, probed in the order `claude > codex > opencode > gemini`.
+- Press `B` inside lazygit to see each backend's status (`detected` / `missing` / `current`) and switch. `detected` only means the CLI is installed — not that it is logged in or eligible; on generation failure the hint line includes the backend name and a one-line stderr summary (e.g. gemini's `IneligibleTierError`) so you can fix the login or switch with `B`.
+- The choice persists in `$HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf` (shell-sourceable), which you can also edit by hand:
 
 ```sh
 # auto | claude | codex | opencode | gemini | custom
 AI_BACKEND=auto
 
-# AI_BACKEND=custom 时使用:命令从 stdin 读入 prompt+diff,stdout 输出 message
+# Used when AI_BACKEND=custom: the command reads prompt+diff on stdin, prints the message to stdout
 AI_CUSTOM_CMD=""
 ```
 
-## 自定义 lazygit 配置
+## Customizing lazygit
 
-插件通过 `LG_CONFIG_FILE` 加载两层配置(后者覆盖前者):
+The plugin loads two config layers via `LG_CONFIG_FILE` (the latter overrides the former):
 
-1. 插件捆绑的基础层 `lazygit-config.yml`(请勿直接修改,插件更新会覆盖)
-2. 用户覆盖层 `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml`(首次启动自动创建,个性化配置写这里)
+1. The bundled base layer `lazygit-config.yml` (do not edit — plugin updates overwrite it)
+2. Your override layer `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml` (created on first run; put your personal settings here)
 
-基础层刻意保持克制:只开启了鼠标支持、关闭随机 tip、添加 `C` / `B` 两个自定义命令,不做其他键位改动,也不假设你装了 Nerd Font(想要图标可在覆盖层里自行设置 `gui.nerdFontsVersion: "3"`)。注意 `C` 会覆盖 files 面板默认的「用 git editor 提交」;`B` 在有同名默认键位的面板(如 commits)会被默认键位遮蔽,详见上文键位表说明。
+The base layer is deliberately minimal: mouse support on, random tips off, the `C` / `B` custom commands, and nothing else — it also doesn't assume a Nerd Font (set `gui.nerdFontsVersion: "3"` in your override layer if you have one). Remember that `C` overrides the files panel's default "commit using git editor", and `B` is shadowed in panels that bind it by default (like commits) — see the key reference above.
 
-## 文件结构
+## Layout
 
 ```
-herdr-plugin.toml            # 插件 manifest
-lazygit-config.yml           # 捆绑的 lazygit 配置(customCommands 在这里)
+herdr-plugin.toml            # plugin manifest
+lazygit-config.yml           # bundled lazygit config (customCommands live here)
 scripts/
-  ensure-lazygit.sh          # 安装时检测/安装 lazygit
-  run-lazygit.sh             # pane 入口:组装配置后 exec lazygit
-  open-lazygit.sh            # action:分屏打开(幂等 open/focus/toggle)
-  open-lazygit-tab.sh        # action:tab 打开
-  ai-commit-msg.sh           # AI commit message 生成 / 后端管理
+  ensure-lazygit.sh          # detect/install lazygit at plugin install time
+  run-lazygit.sh             # pane entrypoint: assemble config, exec lazygit
+  open-lazygit.sh            # action: open in a split (idempotent open/focus/toggle)
+  open-lazygit-tab.sh        # action: open in a tab
+  ai-commit-msg.sh           # AI commit message generation / backend management
 ```
