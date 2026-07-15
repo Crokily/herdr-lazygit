@@ -58,3 +58,13 @@ customCommands:
         labelFormat: '{{ .name }} — {{ .status }}'
     command: >-
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh" set-backend "$1"' sh {{.Form.Backend | quote}}
+
+  # V — 在独立的 herdr pane 中查看选中文件的 diff(files 面板)
+  # 用 herdr 的窗口系统替代 lazygit 内置的 diff 列:面板可保持纯侧栏布局
+  # (sidePanelWidth: 0.99),diff 在需要时弹出为一个宽 pane(delta 渲染),
+  # 按 q 退出 pager 时 pane 自动关闭。同一时刻只保留一个 diff pane。
+  - key: 'V'
+    context: 'files'
+    description: '在 herdr pane 中查看 diff'
+    command: >-
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" file "$1"' sh {{.SelectedPath | quote}}
