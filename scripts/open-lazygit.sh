@@ -23,6 +23,36 @@ set -euo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
+# --- serialize concurrent launcher runs -------------------------------------
+# `herdr plugin action invoke` is fire-and-forget (returns while the action is
+# still "running"), so even two back-to-back invokes (key auto-repeat, double
+# keypress) run concurrently server-side. Without a lock both snapshot the
+# same pane state and both act on it: two OPENs -> duplicate lazygit panes,
+# or two CLOSEs -> one plugin_pane_not_found failure. Take an exclusive flock
+# BEFORE snapshotting; the fd is inherited across `exec`, so the lock is held
+# until this launcher's final herdr command exits and the next invoke then
+# sees the updated state. The lock file is shared with open-lazygit-tab.sh
+# (both mutate the same lazygit pane state). If the lock cannot be acquired
+# within 10s, another invoke is wedged — dropping this (duplicate) invoke is
+# safer than racing it. If the lock file cannot be created, degrade to the
+# old unlocked behavior.
+lock_file="${TMPDIR:-/tmp}/herdr-lazygit-launcher.lock"
+if ( : >>"$lock_file" ) 2>/dev/null; then
+  exec 9>>"$lock_file"
+  python3 -c '
+import fcntl, sys, time
+deadline = time.time() + 10.0
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except OSError:
+        if time.time() >= deadline:
+            sys.exit(1)
+        time.sleep(0.05)
+' || exit 0
+fi
+
 # --- resolve the directory the pane should open in -------------------------
 target_dir="$(python3 - <<'PY'
 import json, os
@@ -58,7 +88,7 @@ current_json="$("$herdr_bin" pane current 2>/dev/null || true)"
 
 decision="$(HERDR_PANES_JSON="$panes_json" HERDR_CURRENT_JSON="$current_json" \
   HERDR_BIN="$herdr_bin" python3 - <<'PY' || echo OPEN
-import json, os, re, subprocess, sys
+import json, os, re, subprocess, sys, time
 
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]*$")  # option-injection guard for ids
 herdr = os.environ.get("HERDR_BIN") or "herdr"
@@ -88,19 +118,32 @@ def runs_lazygit(pane_id):
         pass
     return False
 
-for p in panes:
-    if not isinstance(p, dict):
-        continue
-    pid = p.get("pane_id") or ""
-    if p.get("workspace_id") != cur.get("workspace_id"):
-        continue
-    if p.get("tab_id") != cur.get("tab_id"):
-        continue
-    if p.get("label") != "Git" or not SAFE.match(pid):
-        continue
-    if not runs_lazygit(pid):
-        continue
-    emit(("CLOSE " if p.get("focused") else "FOCUS ") + pid)
+candidates = [
+    p for p in panes
+    if isinstance(p, dict)
+    and p.get("workspace_id") == cur.get("workspace_id")
+    and p.get("tab_id") == cur.get("tab_id")
+    and p.get("label") == "Git"
+    and SAFE.match(p.get("pane_id") or "")
+]
+
+# A pane freshly created by a just-finished `plugin pane open` can exist while
+# lazygit has not started yet, so a "Git" candidate that fails the process
+# check is re-checked briefly before we conclude it is not ours (only costs
+# time when a Git-labeled pane fails the check — the common no-pane and
+# running-pane cases are unaffected).
+attempts = 4 if candidates else 1
+for i in range(attempts):
+    matches = [p for p in candidates if runs_lazygit(p["pane_id"])]
+    if matches:
+        # Prefer the focused match: with duplicates, first-match-wins would
+        # FOCUS a sibling instead of toggling the focused pane closed.
+        for p in matches:
+            if p.get("focused"):
+                emit("CLOSE " + p["pane_id"])
+        emit("FOCUS " + matches[0]["pane_id"])
+    if i + 1 < attempts:
+        time.sleep(0.3)
 print("OPEN")
 PY
 )"

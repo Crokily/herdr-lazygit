@@ -27,6 +27,7 @@ CONFIG_FILE="$CONFIG_DIR/ai-backend.conf"
 
 MSG_NO_STAGED="(没有 staged 改动 — 先用空格 stage 文件)"
 MSG_NO_BACKEND="(未找到可用的 AI CLI:claude/codex/opencode/gemini)"
+MSG_NO_CUSTOM_CMD="(custom 后端未配置 AI_CUSTOM_CMD — 编辑 ai-backend.conf 或按 B 换后端)"
 MSG_TIMEOUT="(AI 生成超时,请重试或换后端)"
 MSG_FAILED="(AI 生成失败,请检查后端登录状态或换后端)"
 
@@ -55,23 +56,50 @@ load_config() {
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
-# 带超时地运行命令:stdin 透传,stdout 透传,stderr 丢弃。
+# 带超时地运行命令:stdin 透传,stdout 透传;stderr 默认丢弃,
+# 若设置了 AI_ERR_FILE 则写入该文件(供失败时提取诊断提示)。
 # 超时 exit 124;其余透传子进程退出码。
 run_with_timeout() {
   python3 -c '
-import subprocess, sys
+import os, subprocess, sys
 timeout = float(sys.argv[1])
+err_path = os.environ.get("AI_ERR_FILE") or ""
+err = open(err_path, "wb") if err_path else subprocess.DEVNULL
 try:
     p = subprocess.run(sys.argv[2:], stdin=sys.stdin.buffer,
-                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=err,
                        timeout=timeout)
 except subprocess.TimeoutExpired:
     sys.exit(124)
 except FileNotFoundError:
     sys.exit(127)
+finally:
+    if err is not subprocess.DEVNULL:
+        err.close()
 sys.stdout.buffer.write(p.stdout)
 sys.exit(p.returncode)
 ' "$TIMEOUT_SEC" "$@"
+}
+
+# 从 stderr 文件里提取一行简短诊断(去 ANSI,优先含 Error/error 的行,截断)
+stderr_hint() {
+  # $1 = stderr 文件路径
+  [ -s "${1:-}" ] || return 0
+  python3 -c '
+import re, sys
+try:
+    data = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+except OSError:
+    sys.exit(0)
+data = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", data)   # 去 ANSI 转义
+lines = [l.strip() for l in data.splitlines() if l.strip()]
+if not lines:
+    sys.exit(0)
+pick = next((l for l in lines if re.search(r"error", l, re.I)), lines[-1])
+if len(pick) > 80:
+    pick = pick[:77] + "..."
+sys.stdout.write(pick)
+' "$1"
 }
 
 # 净化模型输出:去 markdown 围栏/前后引号/空行/"commit message:" 前缀/编号,最多留 3 行
@@ -184,7 +212,12 @@ cmd_candidates() {
 
   backend="$(resolve_backend)"
   if [ -z "$backend" ]; then
-    printf '%s\n' "$MSG_NO_BACKEND"
+    # 按配置区分原因,避免一律回答「未找到 AI CLI」误导用户
+    case "$AI_BACKEND" in
+      custom) printf '%s\n' "$MSG_NO_CUSTOM_CMD" ;;
+      auto)   printf '%s\n' "$MSG_NO_BACKEND" ;;
+      *)      printf '(当前后端 %s 未安装 — 按 B 换后端)\n' "$AI_BACKEND" ;;
+    esac
     return 0
   fi
 
@@ -198,17 +231,30 @@ if len(d) > limit:
 sys.stdout.write(d)
 ' "$DIFF_MAX_CHARS")"
 
+  local err_file hint
+  err_file="$(mktemp "${TMPDIR:-/tmp}/ai-commit-msg.err.XXXXXX")"
+
   rc=0
-  raw="$(printf '%s' "$diff" | "gen_$backend")" || rc=$?
+  raw="$(printf '%s' "$diff" | AI_ERR_FILE="$err_file" "gen_$backend")" || rc=$?
 
   if [ "$rc" -eq 124 ]; then
+    rm -f "$err_file"
     printf '%s\n' "$MSG_TIMEOUT"
     return 0
   fi
   if [ "$rc" -ne 0 ]; then
-    printf '%s\n' "$MSG_FAILED"
+    # 失败时带上后端名和一行 stderr 摘要(如 gemini 的 IneligibleTierError),
+    # 否则用户只看到笼统的失败提示,无从排查登录/资格问题
+    hint="$(stderr_hint "$err_file" || true)"
+    rm -f "$err_file"
+    if [ -n "$hint" ]; then
+      printf '(AI 生成失败[%s]: %s — 请检查后端登录状态或换后端)\n' "$backend" "$hint"
+    else
+      printf '%s\n' "$MSG_FAILED"
+    fi
     return 0
   fi
+  rm -f "$err_file"
 
   result="$(printf '%s' "$raw" | sanitize_output)"
   if [ -z "$result" ]; then
@@ -265,6 +311,15 @@ cmd_set_backend() {
   esac
 
   load_config
+  # custom 后端必须先配置 AI_CUSTOM_CMD,否则 candidates 会一路失败,
+  # 且错误提示会误导用户以为是没装 AI CLI
+  if [ "$name" = "custom" ] && [ -z "$AI_CUSTOM_CMD" ]; then
+    echo "无法切换到 custom 后端:AI_CUSTOM_CMD 未配置。" >&2
+    echo "请先在 $CONFIG_FILE 中加入一行,例如:" >&2
+    echo "  AI_CUSTOM_CMD='my-ai-cli --flag'   # stdin 收 prompt+diff,stdout 出 message" >&2
+    echo "再执行 set-backend custom。" >&2
+    return 1
+  fi
   mkdir -p "$CONFIG_DIR"
   {
     printf 'AI_BACKEND=%s\n' "$name"

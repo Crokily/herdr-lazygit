@@ -19,6 +19,28 @@ set -euo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
+# --- serialize concurrent launcher runs -------------------------------------
+# Same locking as open-lazygit.sh (see the comment there): action invokes are
+# fire-and-forget, so rapid repeats race the snapshot-then-act logic below.
+# The lock file is SHARED with open-lazygit.sh — both mutate the same lazygit
+# pane state. Held across `exec` until the final herdr command exits.
+lock_file="${TMPDIR:-/tmp}/herdr-lazygit-launcher.lock"
+if ( : >>"$lock_file" ) 2>/dev/null; then
+  exec 9>>"$lock_file"
+  python3 -c '
+import fcntl, sys, time
+deadline = time.time() + 10.0
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except OSError:
+        if time.time() >= deadline:
+            sys.exit(1)
+        time.sleep(0.05)
+' || exit 0
+fi
+
 # --- resolve the directory the pane should open in -------------------------
 target_dir="$(python3 - <<'PY'
 import json, os
@@ -53,7 +75,7 @@ current_json="$("$herdr_bin" pane current 2>/dev/null || true)"
 
 decision="$(HERDR_PANES_JSON="$panes_json" HERDR_CURRENT_JSON="$current_json" \
   HERDR_BIN="$herdr_bin" python3 - <<'PY' || echo OPEN
-import json, os, re, subprocess, sys
+import json, os, re, subprocess, sys, time
 
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]*$")  # option-injection guard for ids
 herdr = os.environ.get("HERDR_BIN") or "herdr"
@@ -83,26 +105,34 @@ def runs_lazygit(pane_id):
         pass
     return False
 
-matches = []
-for p in panes:
-    if not isinstance(p, dict):
-        continue
-    pid = p.get("pane_id") or ""
-    tid = p.get("tab_id") or ""
-    if p.get("workspace_id") != cur.get("workspace_id"):
-        continue
-    if p.get("label") != "Git" or not SAFE.match(pid) or not SAFE.match(tid):
-        continue
-    if not runs_lazygit(pid):
-        continue
-    matches.append(p)
+candidates = [
+    p for p in panes
+    if isinstance(p, dict)
+    and p.get("workspace_id") == cur.get("workspace_id")
+    and p.get("label") == "Git"
+    and SAFE.match(p.get("pane_id") or "")
+    and SAFE.match(p.get("tab_id") or "")
+]
 
-# Prefer a match in the current tab (focus/toggle in place) over a cross-tab switch.
-for p in matches:
-    if p.get("tab_id") == cur.get("tab_id"):
-        emit(("CLOSE " if p.get("focused") else "FOCUS ") + p["pane_id"])
-for p in matches:
-    emit("SWITCHTAB " + p["tab_id"])
+# A pane freshly created by a just-finished `plugin pane open` can exist while
+# lazygit has not started yet, so a "Git" candidate that fails the process
+# check is re-checked briefly before we conclude it is not ours.
+attempts = 4 if candidates else 1
+for i in range(attempts):
+    matches = [p for p in candidates if runs_lazygit(p["pane_id"])]
+    if matches:
+        # Prefer a match in the current tab (focus/toggle in place) over a
+        # cross-tab switch; among current-tab duplicates prefer the focused
+        # one, so a toggle press always closes the pane the user is in.
+        in_tab = [p for p in matches if p.get("tab_id") == cur.get("tab_id")]
+        for p in in_tab:
+            if p.get("focused"):
+                emit("CLOSE " + p["pane_id"])
+        if in_tab:
+            emit("FOCUS " + in_tab[0]["pane_id"])
+        emit("SWITCHTAB " + matches[0]["tab_id"])
+    if i + 1 < attempts:
+        time.sleep(0.3)
 print("OPEN")
 PY
 )"

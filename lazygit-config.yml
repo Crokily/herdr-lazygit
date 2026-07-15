@@ -5,7 +5,9 @@
 # 那里的同名配置会覆盖本文件 —— 请不要直接改这个文件。
 #
 # 说明:
-# - 刻意保持克制,不改动 lazygit 默认键位,只新增 C / B 两个自定义命令。
+# - 刻意保持克制,只添加 C / B 两个自定义命令,不做其他键位改动。
+#   注意 C 覆盖了 files 面板默认的「用 git editor 提交」(Commit changes
+#   using git editor);B 的 global 上下文会被面板级默认键位遮蔽(见下)。
 # - 不设置 gui.nerdFontsVersion(不假设用户装了 Nerd Font)。
 
 gui:
@@ -37,6 +39,9 @@ customCommands:
   # B — 切换 AI 后端(全局)
   # 列出 ai-commit-msg.sh backends 的输出(名字<TAB>状态),
   # 选中后写入 $HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf。
+  # 局限:lazygit 里面板级默认键位优先于 context: 'global' 的自定义命令,
+  # 所以在 commits 面板按 B 触发的是默认的「标记 rebase base commit」
+  # (有副作用),不会弹本菜单;请在 files 等无冲突面板使用。
   - key: 'B'
     context: 'global'
     description: '切换 AI commit 后端'
