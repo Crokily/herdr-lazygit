@@ -2,15 +2,46 @@
 
 [中文文档](README.zh-CN.md)
 
-A [herdr](https://herdr.dev) plugin that summons [lazygit](https://github.com/jesseduffield/lazygit) with one keypress, with built-in AI commit message generation.
+**One keypress summons a git sidebar right next to your work.** It puts [lazygit](https://github.com/jesseduffield/lazygit) inside [herdr](https://herdr.dev)'s window system: a minimal 42-column single-column panel by default, wide panes popping up beside it when something needs more room, and an AI writing your commit messages.
 
-- Opens lazygit in a split pane or its own tab, in the directory of your currently focused pane
-- Idempotent launcher: triggering again focuses / toggles the existing pane instead of stacking duplicates
-- Press `C` to have an AI read your staged diff and propose 3 conventional-commit candidates — pick one to commit
-- Press `U` to zoom the selected file / commit / stash entry into a wide herdr pane
-- Press `;` to open the plugin's settings pane (AI backend / model / prompt, key remapping, pane widths)
+## What it feels like
 
-Design rationale (the three-verb model, key-picking rules, config layering) lives in [DESIGN.md](DESIGN.md).
+Press `prefix+g` and a narrow git sidebar slides open next to your current directory (press again to tuck it away — it never stacks duplicates). A typical commit goes like this:
+
+1. **Review**: changed files are listed with M/A/D status colors. To inspect one, select it and press `U` — a wide pane opens beside the sidebar with the full diff (rendered by delta). Press `q`, the pane vanishes, the layout snaps back;
+2. **Pick**: `Space` (or double-click) stages a file; `Enter` lets you stage hunk by hunk;
+3. **Commit**: press `C`. The AI reads what you staged and pops 3 conventional-commit candidates a few seconds later — hit Enter to commit. Not happy? `z` undoes it, try again;
+4. **Sync**: `p` pull, `P` push, `f` fetch. One key per verb.
+
+Browsing history uses the same verb: select any commit and press `U` for the full `git show`, or a stash entry for its patch. **`U` means "zoom" — whatever doesn't fit in the single column pops out beside it.**
+
+### Three keys are the whole surface
+
+The plugin adds exactly three keys — one verb each; everything else is stock lazygit (press `?` inside for the built-in list):
+
+| Key | Verb | What it does |
+| --- | --- | --- |
+| `C` | **Commit** | AI reads the staged diff → 3 candidates → Enter commits |
+| `U` | **Zoom** | File diff / commit details / stash patch in a wide pane; `q` closes |
+| `;` | **Settings** | Opens the settings pane — every knob below lives there |
+
+All three keys are remappable (see below), and the mouse works throughout: click to select, double-click to stage, wheel to scroll.
+
+### The settings pane (`;`)
+
+Press `;` from anywhere in lazygit and a settings pane (fzf-driven, keyboard and mouse) opens beside the sidebar:
+
+- **AI backend**: claude / codex / opencode / gemini — whichever is installed (auto-detected by default);
+- **AI model**: per backend — defaults deliberately pick the cheap/fast tier (haiku for claude) so your CLI's expensive default model is never burned on commit messages;
+- **AI prompt**: opens in `$EDITOR` — want Chinese messages, emoji, a different format? Edit here;
+- **Keys**: remap C / U / ; live — press the new key; collisions with lazygit built-ins are rejected with the owner shown;
+- **Widths**: sidebar and zoom pane columns.
+
+Changes apply **the moment you focus lazygit again** — it hot-reloads its config on focus, no restart.
+
+### What AI commit needs
+
+Any one of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemini`. No API keys — it rides your CLI's own login. On failure the menu shows a hint line (starting with `(`) naming the cause; selecting it never commits, so dismissing with Enter is safe.
 
 ## Install
 
@@ -38,65 +69,22 @@ type = "shell"
 command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
 ```
 
-`prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
+Run `herdr server reload-config` and you're set. `prefix+g` behaves as: not open → open in a split; open but unfocused → focus; focused → close.
 
 > **Note (herdr platform behavior):** an action's context always resolves from the pane that currently has **UI focus**, not from the process that invoked it. Invoking `herdr plugin action invoke …` from a background pane or script opens lazygit next to whatever the user is focused on, takes its cwd from that pane, and steals focus. Only trigger these actions through foreground keybindings.
 
-## Key reference
+## Reference
 
-The plugin adds exactly three keys — one per verb; everything else is stock lazygit (press `?` inside lazygit for the full list):
+### Key details
 
-| Key | Panel | Action |
-| --- | --- | --- |
-| `C` | Files | **AI commit message**: reads the staged diff, pops a candidate menu, Enter commits (overrides the files panel's low-traffic default "commit using git editor") |
-| `U`\* | Files / Commits / Stash | **Zoom**: opens the selected file's diff, the selected commit, or the selected stash entry in a wide herdr pane |
-| `;`\* | Global | **Settings**: opens the plugin settings pane |
-| `Space` | Files | Stage / unstage the selected file |
-| `d` | Files | Discard changes to the selected file |
-| `v` | Files/lists | Range select (lazygit built-in) |
-| `V` | Commits | Paste cherry-picked commits (lazygit built-in) |
-| `o` | Files | Open file with the OS default app |
-| `e` | Files | Open file in your editor |
-| `f` | Files | Fetch |
-| `p` | Global | Pull |
-| `P` | Global | Push |
-| `z` | Global | Undo the last operation (reflog-based) |
-| `?` | Global | Open the keybinding help menu |
+- `C` only reads **staged** content — stage first, then press. It overrides the files panel's low-traffic built-in "commit using git editor" (rebind that in `lazygit-user.yml` if you miss it).
+- `U`'s three contexts: files panel = the selected file's diff (staged + unstaged; untracked files diffed against `/dev/null`); commits / sub-commits / reflog panels = `git show`; stash panel = the entry's patch. Only one zoom pane exists at a time — pressing again replaces it.
+- `U` and `;` are the defaults produced by a **free-key analysis** of every lazygit 0.63.0 built-in binding: candidate `Z` is taken by `universal.redo`, `Ctrl+S` / `O` collide with the filtering and PR menus, while `U` and `;` are unbound in every panel (full occupancy matrix in [DESIGN.md](DESIGN.md) Appendix A). The key-picking rule: **plugin keys must not shadow commonly-used lazygit built-ins** — which is why `v` (range select) and `V` (cherry-pick paste) stay stock.
+- Keys persist in `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`.
 
-\* `U` (zoom) and `;` (settings) are the defaults picked by the free-key analysis against lazygit 0.63.0's built-in bindings: zoom candidate `Z` is taken by `universal.redo`, settings candidates `Ctrl+S` / `O` collide with `universal.filteringMenu` / `branches.viewPullRequestOptions`, while `U` and `;` are unbound in every panel (full matrix in DESIGN.md Appendix A). All three plugin keys can be remapped from the settings pane; they persist in `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`.
+### AI backend config file
 
-### Using `C` (AI commit)
-
-- Stage the files you want to commit with `Space` first, then press `C`.
-- The candidate menu calls the AI CLI before it opens — expect a few seconds.
-- With nothing staged, no usable backend, or a generation timeout, the menu shows a hint line starting with `(`; selecting such a line does **not** commit — it just echoes the hint to the command log, so pressing Enter to dismiss it is safe.
-- Generated messages are single-line, English, conventional-commit style (`feat:` / `fix:` / `chore:` …).
-- AI backend, model, and prompt are all configured from the settings pane (`;`).
-
-### Using `U` (zoom)
-
-Zoom opens the selected item in a wide pane to the right of the lazygit sidebar, rendered through [delta](https://github.com/dandavison/delta) if installed (plain `less` otherwise). Press `q` to close the pane; the sidebar returns to its configured width. Only one zoom pane exists at a time.
-
-- **Files panel**: the selected file's diff (staged + unstaged; untracked files diffed against `/dev/null`)
-- **Commits / sub-commits / reflog panels**: `git show` of the selected commit
-- **Stash panel**: the selected stash entry's patch
-
-### Using `;` (settings pane)
-
-Press `;` from anywhere in lazygit to open an fzf-driven settings pane beside the sidebar. Requires `fzf` (installed by the plugin's install step; if missing, the pane prints `brew install fzf` instructions).
-
-- Menu items: AI backend / AI model / AI prompt (`$EDITOR`) / Key: Commit / Key: Zoom / Key: Settings / Sidebar width / Zoom width
-- The preview column shows each item's current value; Enter (or double-click) edits it; `Esc`/`q` exits
-- Key remapping prompts you to press the new key and rejects it if it collides with a lazygit built-in (the conflict owner is shown)
-- Changes are written immediately and take effect **as soon as you focus the lazygit pane again** — lazygit hot-reloads its config files on focus, no restart needed
-
-## AI backend configuration
-
-The `C` command relies on any one of these installed AI CLIs: `claude`, `codex`, `opencode`, `gemini`.
-
-- Default mode is `auto`: the first available backend wins, probed in the order `claude > codex > opencode > gemini`.
-- Switch backend / model from the settings pane. `detected` only means the CLI is installed — not that it is logged in or eligible; on generation failure the hint line includes the backend name and a one-line stderr summary (e.g. gemini's `IneligibleTierError`) so you can fix the login or switch backends.
-- The choice persists in `$HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf` (shell-sourceable), which you can also edit by hand — e.g. the `custom` backend needs a manual `AI_CUSTOM_CMD`:
+Beyond the settings pane you can hand-edit `$HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf` (shell-sourceable) — the `custom` backend requires it:
 
 ```sh
 # auto | claude | codex | opencode | gemini | custom
@@ -106,9 +94,11 @@ AI_BACKEND=auto
 AI_CUSTOM_CMD=""
 ```
 
-## Customizing lazygit
+`detected` only means the CLI is installed — not that it is logged in or eligible; failure hints include the backend name and a one-line stderr summary (e.g. gemini's `IneligibleTierError`).
 
-The plugin loads three config layers via `LG_CONFIG_FILE` (later layers win):
+### Three config layers
+
+The plugin loads three lazygit config layers via `LG_CONFIG_FILE` (later layers win):
 
 1. The bundled base layer `lazygit-config.yml` (factory settings — do not edit, plugin updates overwrite it)
 2. The generated layer `$HERDR_PLUGIN_CONFIG_DIR/generated.yml` (written by the settings pane / generator — machine-generated, do not edit)
@@ -116,9 +106,9 @@ The plugin loads three config layers via `LG_CONFIG_FILE` (later layers win):
 
 Scalar settings are overridden field by field; `customCommands` entries accumulate across layers, with the later file winning on the same key + context — so your override layer can replace any plugin command outright. The base layer stays minimal (mouse support on, random tips off) and doesn't assume a Nerd Font (set `gui.nerdFontsVersion: "3"` in your override layer if you have one).
 
-To remap a **plugin** key, use the settings pane (stored in `keys.conf`). To remap a **lazygit built-in** (e.g. to get "commit using git editor" back on some key after `C` shadows it), add a `keybinding` section to `lazygit-user.yml`.
+To remap a **plugin** key, use the settings pane (stored in `keys.conf`). To remap a **lazygit built-in**, add a `keybinding` section to `lazygit-user.yml`.
 
-## Layout
+### Layout
 
 ```
 herdr-plugin.toml            # plugin manifest
@@ -149,3 +139,5 @@ prompt.txt                   # custom AI commit prompt
 generated.yml                # machine-generated lazygit layer — do not edit
 lazygit-user.yml             # your lazygit overrides — always wins
 ```
+
+The full design rationale (three-verb model, lazygit-as-data-engine / herdr-as-window-system, key-picking rules, capability boundaries) lives in [DESIGN.md](DESIGN.md).
