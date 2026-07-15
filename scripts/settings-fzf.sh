@@ -58,6 +58,12 @@ AI_SH="$script_dir/ai-commit-msg.sh"
 GEN_SH="${HERDR_LAZYGIT_GEN_SH:-$script_dir/gen-config-layer.sh}"
 FREE_KEYS_PY="${HERDR_LAZYGIT_FREE_KEYS:-$script_dir/free-keys.py}"
 
+# 插件三动词的默认键——必须与 gen-config-layer.sh 的 def_commit/def_zoom/
+# def_settings 保持同一组值(那边是生成层的唯一真相,这里只做展示与比对)
+DEF_KEY_COMMIT='C'
+DEF_KEY_ZOOM='U'
+DEF_KEY_SETTINGS=';'
+
 CONFIG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 AI_CONF="$CONFIG_DIR/ai-backend.conf"
 KEYS_CONF="$CONFIG_DIR/keys.conf"
@@ -202,15 +208,15 @@ cmd_preview() {
       fi
       ;;
     "键位:Commit")
-      printf '当前:%s\n\n' "${KEY_COMMIT:-C(插件默认)}"
+      printf '当前:%s\n\n' "${KEY_COMMIT:-${DEF_KEY_COMMIT}(插件默认)}"
       printf '说明:files 面板里触发 AI commit message 全流程。\n默认 C 遮蔽 lazygit 低频内置「用 git editor 提交」。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
       ;;
     "键位:Zoom")
-      printf '当前:%s\n\n' "${KEY_ZOOM:-（插件默认,由生成层决定）}"
+      printf '当前:%s\n\n' "${KEY_ZOOM:-${DEF_KEY_ZOOM}(插件默认)}"
       printf '说明:在 files/commits/stash 面板把 diff 放大到侧栏右侧的宽 pane。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
       ;;
     "键位:Settings")
-      printf '当前:%s\n\n' "${KEY_SETTINGS:-（插件默认,由生成层决定）}"
+      printf '当前:%s\n\n' "${KEY_SETTINGS:-${DEF_KEY_SETTINGS}(插件默认)}"
       printf '说明:全局键,打开本设置页。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
       ;;
     "侧栏宽度")
@@ -299,15 +305,16 @@ flow_prompt() {
 
 # ---------------------------------------------------------------------------
 # 子流程:改键位(read -rsn1 抓一个键,free-keys.py check 校验冲突)
-# 用法:flow_key <keys.conf 变量名> <显示名> <free-keys 校验的 context...>
+# 用法:flow_key <keys.conf 变量名> <默认键> <显示名> <free-keys 校验的 context...>
 # ---------------------------------------------------------------------------
 flow_key() {
-  local var="$1" label="$2"; shift 2
+  local var="$1" def="$2" label="$3"; shift 3
   local cur key notation out stty_saved
   load_confs
   cur="$(eval "printf '%s' \"\$$var\"")"
+  cur="${cur:-$def}"
   clear
-  printf '修改 [键位:%s]  (当前:%s)\n\n' "$label" "${cur:-插件默认}"
+  printf '修改 [键位:%s]  (当前:%s)\n\n' "$label" "$cur"
   printf '请按下新键 —— 支持字母/数字/符号,以及 Ctrl 组合(记作 <c-x>)。\n'
   printf 'Esc = 取消。插件键不得遮蔽 lazygit 常用内置键,冲突会被拒绝。\n\n'
   # 关闭流控让 Ctrl-S / Ctrl-Q 可被读到,读完恢复终端设置
@@ -339,6 +346,12 @@ if len(b) == 1:
 ')"
   if [ -z "$notation" ]; then
     MSG="不支持的按键,已取消"
+    return 0
+  fi
+  # 新键 == 当前键:直接放行不走 check(free-keys.py 文档字符串约定——
+  # 否则默认 C 这类"已接受的例外"会被自己的占用记录拒掉,永远改不回去)
+  if [ "$notation" = "$cur" ]; then
+    MSG="[键位:$label] 与当前键相同($notation),未变化"
     return 0
   fi
   # 冲突校验:free-keys.py check KEY context...(非零退出 = 冲突/不可用)
@@ -415,9 +428,9 @@ Enter/双击 = 修改 · Esc/q = 退出'
       "AI 后端")       flow_backend ;;
       "AI 模型")       flow_model ;;
       "AI Prompt")     flow_prompt ;;
-      "键位:Commit")  flow_key KEY_COMMIT "Commit" files ;;
-      "键位:Zoom")    flow_key KEY_ZOOM "Zoom" files commits subCommits reflogCommits stash ;;
-      "键位:Settings") flow_key KEY_SETTINGS "Settings" global ;;
+      "键位:Commit")  flow_key KEY_COMMIT "$DEF_KEY_COMMIT" "Commit" files ;;
+      "键位:Zoom")    flow_key KEY_ZOOM "$DEF_KEY_ZOOM" "Zoom" files commits subCommits reflogCommits stash ;;
+      "键位:Settings") flow_key KEY_SETTINGS "$DEF_KEY_SETTINGS" "Settings" global ;;
       "侧栏宽度")
         load_confs
         flow_width SIDEBAR_COLS "侧栏宽度" "${SIDEBAR_COLS:-42(默认)}"

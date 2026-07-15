@@ -19,10 +19,16 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 helper="$script_dir/layout-helper.py"
 settings_sh="$script_dir/settings-fzf.sh"
 
+# 引号安全(与 show-diff-pane.sh 同款):bash 3.2 的 printf %q 会把多字节
+# UTF-8(如中文路径)拆成非法字节序列,herdr CLI(Rust)收到会 panic。
+# 统一用 python3 shlex.quote:单引号包裹、原始 UTF-8 原样保留。
+shq() { python3 -c 'import shlex, sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$1"; }
+
 # --- 几何参数:默认侧栏 42 列 / 设置页 70 列,panel.conf 可覆盖 -------------
 SIDEBAR_COLS=42
 SETTINGS_COLS=70
-panel_conf="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}/panel.conf"
+config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
+panel_conf="$config_dir/panel.conf"
 # shellcheck disable=SC1090
 [ -f "$panel_conf" ] && . "$panel_conf"
 [ "$SETTINGS_COLS" -ge 40 ] 2>/dev/null || SETTINGS_COLS=70
@@ -51,5 +57,14 @@ python3 "$helper" place-diff "$HERDR_PANE_ID" "$new_pane" "$SIDEBAR_COLS" "$SETT
 
 # 退出前把侧栏宽度还原;settings-fzf.sh 报错(如缺 fzf)时 sleep 让提示可读;
 # 末尾 exit 让 q/Esc 退出后 pane 直接消失
-restore_cmd="python3 $(printf %q "$helper") set-region-width $(printf %q "$HERDR_PANE_ID") $(printf %q "$SIDEBAR_COLS")"
-herdr pane run "$new_pane" "clear; bash $(printf %q "$settings_sh") || sleep 4; $restore_cmd >/dev/null 2>&1; exit" >/dev/null
+restore_cmd="python3 $(shq "$helper") set-region-width $(shq "$HERDR_PANE_ID") $(shq "$SIDEBAR_COLS")"
+# 显式把配置目录传进新 pane:pane run 起的是全新 shell,不继承 lazygit
+# (插件 pane)的 HERDR_PLUGIN_CONFIG_DIR——不传的话设置页会写到回退目录,
+# 而 lazygit 读的是插件配置目录,改动永远不生效。
+if ! herdr pane run "$new_pane" "clear; HERDR_PLUGIN_CONFIG_DIR=$(shq "$config_dir") bash $(shq "$settings_sh") || sleep 4; $restore_cmd >/dev/null 2>&1; exit" >/dev/null; then
+  # run 失败会留下一个空 shell pane:收掉并把侧栏还原,不给用户留残骸
+  herdr pane close "$new_pane" >/dev/null 2>&1 || true
+  python3 "$helper" set-region-width "$HERDR_PANE_ID" "$SIDEBAR_COLS" >/dev/null 2>&1 || true
+  echo "open-settings-pane.sh: pane run failed" >&2
+  exit 1
+fi

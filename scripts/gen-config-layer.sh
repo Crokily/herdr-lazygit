@@ -35,11 +35,19 @@ mkdir -p "$config_dir"
 keys_conf="$config_dir/keys.conf"
 out="$config_dir/generated.yml"
 
+# 插件三动词的默认键(设置页 settings-fzf.sh 的 DEF_KEY_* 必须与此保持一致)
+def_commit='C' ; def_zoom='U' ; def_settings=';'
+
 # --- 缓存:输入都没变就不重新生成 -------------------------------------------
 self="${BASH_SOURCE[0]:-$0}"
 if [ -f "$out" ] && [ ! "$self" -nt "$out" ] && [ ! "$script_dir/free-keys.py" -nt "$out" ]; then
-  if [ ! -f "$keys_conf" ] || [ ! "$keys_conf" -nt "$out" ]; then
-    exit 0
+  if [ -f "$keys_conf" ]; then
+    [ "$keys_conf" -nt "$out" ] || exit 0
+  else
+    # keys.conf 不存在:只有当 generated.yml 确实由默认键生成(看头部
+    # marker 行)才可跳过——覆盖"用户手删 keys.conf 想恢复默认"的场景,
+    # 避免旧键残留。
+    grep -qxF "# keys: $def_commit $def_zoom $def_settings" "$out" 2>/dev/null && exit 0
   fi
 fi
 
@@ -53,9 +61,9 @@ if [ -f "$keys_conf" ]; then
         "${KEY_COMMIT:-}" "${KEY_ZOOM:-}" "${KEY_SETTINGS:-}" ) 2>/dev/null
   )"
 fi
-[ -n "$k_commit" ]   || k_commit='C'
-[ -n "$k_zoom" ]     || k_zoom='U'
-[ -n "$k_settings" ] || k_settings=';'
+[ -n "$k_commit" ]   || k_commit="$def_commit"
+[ -n "$k_zoom" ]     || k_zoom="$def_zoom"
+[ -n "$k_settings" ] || k_settings="$def_settings"
 
 # YAML 单引号转义('' 表示一个 ')
 yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
@@ -94,6 +102,10 @@ tmp="$out.tmp.$$"
 {
   cat <<'EOF'
 # generated.yml — machine-generated, do not edit(由 gen-config-layer.sh 生成)
+EOF
+  # marker 行:记录生成时用的键,供缓存判断"keys.conf 已删但本文件非默认键"
+  printf '# keys: %s %s %s\n' "$k_commit" "$k_zoom" "$k_settings"
+  cat <<'EOF'
 #
 # 改键请走设置页(lazygit 里按设置键),或手改 keys.conf 后重开 lazygit。
 # 想覆盖这里的任何配置,写 lazygit-user.yml(它在本文件之后加载,永远赢)。

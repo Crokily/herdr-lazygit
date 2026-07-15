@@ -7,8 +7,8 @@ A [herdr](https://herdr.dev) plugin that summons [lazygit](https://github.com/je
 - Opens lazygit in a split pane or its own tab, in the directory of your currently focused pane
 - Idempotent launcher: triggering again focuses / toggles the existing pane instead of stacking duplicates
 - Press `C` to have an AI read your staged diff and propose 3 conventional-commit candidates — pick one to commit
-- Press `KEY_ZOOM` to zoom the selected file / commit / stash entry into a wide herdr pane
-- Press `KEY_SETTINGS` to open the plugin's settings pane (AI backend / model / prompt, key remapping, pane widths)
+- Press `U` to zoom the selected file / commit / stash entry into a wide herdr pane
+- Press `;` to open the plugin's settings pane (AI backend / model / prompt, key remapping, pane widths)
 
 Design rationale (the three-verb model, key-picking rules, config layering) lives in [DESIGN.md](DESIGN.md).
 
@@ -49,8 +49,8 @@ The plugin adds exactly three keys — one per verb; everything else is stock la
 | Key | Panel | Action |
 | --- | --- | --- |
 | `C` | Files | **AI commit message**: reads the staged diff, pops a candidate menu, Enter commits (overrides the files panel's low-traffic default "commit using git editor") |
-| `KEY_ZOOM`\* | Files / Commits / Stash | **Zoom**: opens the selected file's diff, the selected commit, or the selected stash entry in a wide herdr pane |
-| `KEY_SETTINGS`\* | Global | **Settings**: opens the plugin settings pane |
+| `U`\* | Files / Commits / Stash | **Zoom**: opens the selected file's diff, the selected commit, or the selected stash entry in a wide herdr pane |
+| `;`\* | Global | **Settings**: opens the plugin settings pane |
 | `Space` | Files | Stage / unstage the selected file |
 | `d` | Files | Discard changes to the selected file |
 | `v` | Files/lists | Range select (lazygit built-in) |
@@ -63,7 +63,7 @@ The plugin adds exactly three keys — one per verb; everything else is stock la
 | `z` | Global | Undo the last operation (reflog-based) |
 | `?` | Global | Open the keybinding help menu |
 
-\* `KEY_ZOOM` / `KEY_SETTINGS` are placeholders — the final default keys are picked by the free-key analysis during integration (zoom candidates in order `Z` > `U` > `X`; settings candidates `Ctrl+S` > `O` > `;` > `,`; see DESIGN.md Appendix A) and this table will be updated then. All three plugin keys can be remapped from the settings pane; they persist in `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`.
+\* `U` (zoom) and `;` (settings) are the defaults picked by the free-key analysis against lazygit 0.63.0's built-in bindings: zoom candidate `Z` is taken by `universal.redo`, settings candidates `Ctrl+S` / `O` collide with `universal.filteringMenu` / `branches.viewPullRequestOptions`, while `U` and `;` are unbound in every panel (full matrix in DESIGN.md Appendix A). All three plugin keys can be remapped from the settings pane; they persist in `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`.
 
 ### Using `C` (AI commit)
 
@@ -71,9 +71,9 @@ The plugin adds exactly three keys — one per verb; everything else is stock la
 - The candidate menu calls the AI CLI before it opens — expect a few seconds.
 - With nothing staged, no usable backend, or a generation timeout, the menu shows a hint line starting with `(`; selecting such a line does **not** commit — it just echoes the hint to the command log, so pressing Enter to dismiss it is safe.
 - Generated messages are single-line, English, conventional-commit style (`feat:` / `fix:` / `chore:` …).
-- AI backend, model, and prompt are all configured from the settings pane (`KEY_SETTINGS`).
+- AI backend, model, and prompt are all configured from the settings pane (`;`).
 
-### Using `KEY_ZOOM` (zoom)
+### Using `U` (zoom)
 
 Zoom opens the selected item in a wide pane to the right of the lazygit sidebar, rendered through [delta](https://github.com/dandavison/delta) if installed (plain `less` otherwise). Press `q` to close the pane; the sidebar returns to its configured width. Only one zoom pane exists at a time.
 
@@ -81,9 +81,9 @@ Zoom opens the selected item in a wide pane to the right of the lazygit sidebar,
 - **Commits / sub-commits / reflog panels**: `git show` of the selected commit
 - **Stash panel**: the selected stash entry's patch
 
-### Using `KEY_SETTINGS` (settings pane)
+### Using `;` (settings pane)
 
-Press `KEY_SETTINGS` from anywhere in lazygit to open an fzf-driven settings pane beside the sidebar. Requires `fzf` (installed by the plugin's install step; if missing, the pane prints `brew install fzf` instructions).
+Press `;` from anywhere in lazygit to open an fzf-driven settings pane beside the sidebar. Requires `fzf` (installed by the plugin's install step; if missing, the pane prints `brew install fzf` instructions).
 
 - Menu items: AI backend / AI model / AI prompt (`$EDITOR`) / Key: Commit / Key: Zoom / Key: Settings / Sidebar width / Zoom width
 - The preview column shows each item's current value; Enter (or double-click) edits it; `Esc`/`q` exits

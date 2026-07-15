@@ -7,8 +7,8 @@
 - 分屏或独立 tab 打开 lazygit,自动定位到当前聚焦 pane 的目录
 - 幂等启动:重复触发时自动 聚焦 / 收起,不会开出一堆重复 pane
 - 按 `C` 让 AI 读取 staged diff,生成 3 个 conventional commit 候选,选一个直接提交
-- 按 `KEY_ZOOM` 把选中的文件 / commit / stash 条目放大到一个宽 herdr pane 里查看
-- 按 `KEY_SETTINGS` 打开插件设置页(AI 后端 / 模型 / prompt、键位重映射、面板宽度)
+- 按 `U` 把选中的文件 / commit / stash 条目放大到一个宽 herdr pane 里查看
+- 按 `;` 打开插件设置页(AI 后端 / 模型 / prompt、键位重映射、面板宽度)
 
 设计思想(三动词模型、选键铁律、三层配置)见 [DESIGN.md](DESIGN.md)。
 
@@ -49,8 +49,8 @@ command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
 | 键 | 面板 | 作用 |
 | --- | --- | --- |
 | `C` | 文件 | **AI 生成 commit message**:读取 staged diff,弹出候选菜单,回车即提交(覆盖了 files 面板低频的默认键「用 git editor 提交」) |
-| `KEY_ZOOM`\* | 文件 / 提交 / 贮藏 | **放大**:把选中文件的 diff、选中 commit、或选中 stash 条目放进一个宽 herdr pane |
-| `KEY_SETTINGS`\* | 全局 | **设置**:打开插件设置页 |
+| `U`\* | 文件 / 提交 / 贮藏 | **放大**:把选中文件的 diff、选中 commit、或选中 stash 条目放进一个宽 herdr pane |
+| `;`\* | 全局 | **设置**:打开插件设置页 |
 | `空格` | 文件 | stage / unstage 当前文件 |
 | `d` | 文件 | 丢弃当前文件的改动 |
 | `v` | 文件/列表 | 范围选择(lazygit 内置) |
@@ -63,7 +63,7 @@ command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
 | `z` | 全局 | 撤销上一步操作(基于 reflog) |
 | `?` | 全局 | 打开键位帮助菜单 |
 
-\* `KEY_ZOOM` / `KEY_SETTINGS` 是占位符——最终默认键由集成阶段的空闲键分析确定(放大键候选顺序 `Z` > `U` > `X`;设置键候选顺序 `Ctrl+S` > `O` > `;` > `,`,见 DESIGN.md 附录 A),届时回填本表。三个插件键都可以在设置页里重映射,持久化在 `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`。
+\* `U`(放大)与 `;`(设置)是空闲键分析对 lazygit 0.63.0 内置键得出的默认值:放大键候选 `Z` 被 `universal.redo` 占用;设置键候选 `Ctrl+S` / `O` 分别撞上 `universal.filteringMenu` / `branches.viewPullRequestOptions`;而 `U` 和 `;` 在所有面板都无内置绑定(完整占用矩阵见 DESIGN.md 附录 A)。三个插件键都可以在设置页里重映射,持久化在 `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`。
 
 ### 使用 `C`(AI commit)的注意事项
 
@@ -71,9 +71,9 @@ command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
 - 候选菜单弹出前会调用 AI CLI,可能需要几秒钟。
 - 如果没有 staged 改动、没有可用的 AI 后端、或生成超时,菜单里会显示一条以 `(` 开头的中文提示行;选中这类提示行**不会**真的执行 commit,只会把提示回显到 command log,可放心回车关闭。
 - 生成的 message 为 conventional commit 格式(`feat:` / `fix:` / `chore:` …),英文,单行。
-- AI 后端、模型、prompt 都在设置页(`KEY_SETTINGS`)里配置。
+- AI 后端、模型、prompt 都在设置页(`;`)里配置。
 
-### 使用 `KEY_ZOOM`(放大)
+### 使用 `U`(放大)
 
 放大会在 lazygit 侧栏右侧打开一个宽 pane 展示选中对象,装了 [delta](https://github.com/dandavison/delta) 时用 delta 渲染(否则用 `less`)。按 `q` 关闭 pane,侧栏自动恢复到配置宽度。同一时刻只有一个放大 pane。
 
@@ -81,9 +81,9 @@ command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
 - **commits / sub-commits / reflog 面板**:选中 commit 的 `git show`
 - **stash 面板**:选中 stash 条目的补丁内容
 
-### 使用 `KEY_SETTINGS`(设置页)
+### 使用 `;`(设置页)
 
-在 lazygit 任意面板按 `KEY_SETTINGS`,侧栏旁边会打开一个 fzf 驱动的设置页。依赖 `fzf`(插件安装步骤会自动装;缺失时设置页会打印 `brew install fzf` 指引)。
+在 lazygit 任意面板按 `;`,侧栏旁边会打开一个 fzf 驱动的设置页。依赖 `fzf`(插件安装步骤会自动装;缺失时设置页会打印 `brew install fzf` 指引)。
 
 - 菜单项:AI 后端 / AI 模型 / AI prompt(`$EDITOR`)/ 键位:Commit / 键位:Zoom / 键位:Settings / 侧栏宽度 / 放大窗宽度
 - preview 列显示每项的当前值;回车(或双击)进入修改;`Esc`/`q` 退出
