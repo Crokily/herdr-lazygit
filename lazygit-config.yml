@@ -68,3 +68,11 @@ customCommands:
     description: '在 herdr pane 中查看 diff'
     command: >-
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" file "$1"' sh {{.SelectedPath | quote}}
+
+  # v(小写)— 同 V,避免大小写踩空。代价:覆盖 files 面板默认的
+  # range select(范围选择),但 Shift+↑/↓ 仍可完成同样操作。
+  - key: 'v'
+    context: 'files'
+    description: '在 herdr pane 中查看 diff(同 V)'
+    command: >-
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" file "$1"' sh {{.SelectedPath | quote}}
