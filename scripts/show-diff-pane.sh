@@ -8,8 +8,12 @@
 #   - splits the widest other pane in the tab (falls back to the sidebar pane,
 #     splitting down) and runs the diff there through delta (or less)
 #   - the pane runs "<diff> ; exit", so quitting the pager (q) closes the pane
+#   - 无效的 hash / stash 索引不会空白闪退:引用校验在 pane 内执行,失败时
+#     显示可读错误并停留数秒后自动关闭(侧栏宽度照常还原)
 #
-# Usage: show-diff-pane.sh file <repo-relative-path>
+# Usage: show-diff-pane.sh file   <repo-relative-path>
+#        show-diff-pane.sh commit <hash>
+#        show-diff-pane.sh stash  <index>
 #
 # bash 3.2 compatible (macOS default).
 set -euo pipefail
@@ -19,9 +23,14 @@ target="${2:-}"
 [ -n "$target" ] || exit 0
 [ "${HERDR_ENV:-}" = "1" ] || { echo "show-diff-pane.sh: not inside herdr" >&2; exit 1; }
 
+# 引号安全:bash 3.2 的 printf %q 会把多字节 UTF-8 拆成"原始字节+八进制
+# 转义"的混合形式,herdr CLI(Rust)收到非法 UTF-8 argv 会直接 panic。
+# 统一改用 python3 shlex.quote:单引号包裹、原始 UTF-8 原样保留。
+shq() { python3 -c 'import shlex, sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$1"; }
+
 repo="$(git rev-parse --show-toplevel)"
-q_repo="$(printf %q "$repo")"
-q_target="$(printf %q "$target")"
+q_repo="$(shq "$repo")"
+q_target="$(shq "$target")"
 
 # --- build the command that renders the diff -------------------------------
 # With delta: pipe raw git output into it. Without: let git colorize, page with less.
@@ -32,6 +41,11 @@ else
   git_cmd="git -c color.diff=always -C $q_repo"
   pager="less -R"
 fi
+
+# check_cmd 非空时会在 pane 内先跑校验:失败则显示 err_msg 并停留数秒,
+# 避免 git 报错进 stderr、pager 秒退导致的"空白闪退"。
+check_cmd=""
+err_msg=""
 
 case "$kind" in
   file)
@@ -44,13 +58,30 @@ case "$kind" in
     fi
     ;;
   commit)
+    # ^{commit} 顺带把 tag 剥成 commit;--quiet 抑制 stderr,失败走错误分支
+    check_cmd="git -C $q_repo rev-parse --verify --quiet $(shq "${target}^{commit}") >/dev/null 2>&1"
     base_cmd="$git_cmd show $q_target"
+    err_msg="无效的 commit: ${target}"
+    ;;
+  stash)
+    # target 是 {{.SelectedStashEntry.Index}} 给的数字;非数字/越界都会被
+    # rev-parse 拦下(stash@{abc} / stash@{99} 均解析失败)
+    q_ref="$(shq "stash@{${target}}")"
+    check_cmd="git -C $q_repo rev-parse --verify --quiet $q_ref >/dev/null 2>&1"
+    # 标题行(stash@{N}: WIP on ...)+ 空行 + 补丁正文,一起交给 pager
+    base_cmd="{ git -C $q_repo log -g -1 --format='%gd: %gs' $q_ref; echo; $git_cmd stash show -p $q_ref; }"
+    err_msg="无效的 stash 索引: ${target}"
     ;;
   *)
     echo "show-diff-pane.sh: unknown kind '$kind'" >&2; exit 1 ;;
 esac
 
 view_cmd="$base_cmd | $pager"
+if [ -n "$check_cmd" ]; then
+  # 校验放在 pane 内执行(而非本脚本里),错误对用户可见;sleep 后自动关闭
+  err_cmd="echo; echo $(shq "  herdr-lazygit: $err_msg"); echo $(shq '  (5 秒后自动关闭)'); sleep 5"
+  view_cmd="if $check_cmd; then $view_cmd; else $err_cmd; fi"
+fi
 
 # --- geometry: the diff opens as a wide pane RIGHT of the sidebar ----------
 # `pane split` can only divide the sidebar's own (narrow) rectangle, so after
@@ -99,5 +130,11 @@ herdr pane rename "$new_pane" "GitDiff" >/dev/null 2>&1 || true
 python3 "$helper" place-diff "$HERDR_PANE_ID" "$new_pane" "$SIDEBAR_COLS" "$DIFF_COLS" 2>/dev/null || true
 
 # restore the sidebar width before exiting; "; exit" closes the pane on q
-restore_cmd="python3 $(printf %q "$helper") set-region-width $(printf %q "$HERDR_PANE_ID") $(printf %q "$SIDEBAR_COLS")"
-herdr pane run "$new_pane" "clear; $view_cmd; $restore_cmd >/dev/null 2>&1; exit" >/dev/null
+restore_cmd="python3 $(shq "$helper") set-region-width $(shq "$HERDR_PANE_ID") $(shq "$SIDEBAR_COLS")"
+if ! herdr pane run "$new_pane" "clear; $view_cmd; $restore_cmd >/dev/null 2>&1; exit" >/dev/null; then
+  # run 失败会留下一个空 shell pane:收掉并把侧栏还原,不给用户留残骸
+  herdr pane close "$new_pane" >/dev/null 2>&1 || true
+  python3 "$helper" set-region-width "$HERDR_PANE_ID" "$SIDEBAR_COLS" >/dev/null 2>&1 || true
+  echo "show-diff-pane.sh: pane run failed" >&2
+  exit 1
+fi
