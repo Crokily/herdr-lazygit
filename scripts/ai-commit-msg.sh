@@ -22,6 +22,13 @@ TIMEOUT_SEC="${AI_TIMEOUT_SEC:-60}"
 DIFF_MAX_CHARS=8000
 BACKEND_ORDER="claude codex opencode gemini"   # auto 探测顺序
 
+# 每个后端用的模型:commit message 是小活,默认刻意用便宜/快的档,
+# 避免继承用户 CLI 的默认模型(可能是最贵档 + 高推理强度)。
+# 在 ai-backend.conf 里覆盖;设为空字符串则回退到该 CLI 自己的默认。
+AI_CLAUDE_MODEL="${AI_CLAUDE_MODEL-haiku}"
+AI_CODEX_MODEL="${AI_CODEX_MODEL-}"   # 空 = codex 自己的默认(无公认稳定的便宜档 id,不猜)
+AI_OPENCODE_MODEL="${AI_OPENCODE_MODEL-google/gemini-2.5-flash}"
+
 CONFIG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 CONFIG_FILE="$CONFIG_DIR/ai-backend.conf"
 
@@ -130,22 +137,30 @@ sys.stdout.write("\n".join(out))
 # ---------------------------------------------------------------------------
 
 gen_claude() {
-  # 注意:不能加 --bare(此版本会导致 keychain 凭据读取失败报 Not logged in)
-  run_with_timeout claude -p "$PROMPT"
+  # 注意:不能加 --bare(此版本会导致 keychain 凭据读取失败报 Not logged in)。
+  # 显式 --model(默认 haiku),避免继承用户 CLI 的贵档默认模型。
+  if [ -n "$AI_CLAUDE_MODEL" ]; then
+    run_with_timeout claude -p --model "$AI_CLAUDE_MODEL" "$PROMPT"
+  else
+    run_with_timeout claude -p "$PROMPT"
+  fi
 }
 
 gen_opencode() {
   # 默认模型不可用,必须显式 -m;stderr(横幅/ANSI)已被 run_with_timeout 丢弃
-  run_with_timeout opencode run -m google/gemini-2.5-flash "$PROMPT"
+  run_with_timeout opencode run -m "${AI_OPENCODE_MODEL:-google/gemini-2.5-flash}" "$PROMPT"
 }
 
 gen_codex() {
   # 最终 message 从 -o 文件读最可靠(stdout 不保证长期只有 message)
-  local outfile rc
+  local outfile rc model_args
+  model_args=""
+  [ -n "$AI_CODEX_MODEL" ] && model_args="-m $AI_CODEX_MODEL"
   outfile="$(mktemp "${TMPDIR:-/tmp}/ai-commit-msg.codex.XXXXXX")"
   rc=0
+  # shellcheck disable=SC2086
   run_with_timeout codex exec --skip-git-repo-check -s read-only --color never \
-    -o "$outfile" "$PROMPT" >/dev/null || rc=$?
+    $model_args -o "$outfile" "$PROMPT" >/dev/null || rc=$?
   if [ "$rc" -eq 0 ]; then
     cat "$outfile"
   fi
