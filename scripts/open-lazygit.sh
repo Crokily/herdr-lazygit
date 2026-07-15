@@ -72,14 +72,33 @@ print(d or os.environ.get("HOME") or os.getcwd())
 PY
 )"
 
+# Sidebar width in columns; override via $HERDR_PLUGIN_CONFIG_DIR/panel.conf
+SIDEBAR_COLS=42
+panel_conf="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}/panel.conf"
+# shellcheck disable=SC1090
+[ -f "$panel_conf" ] && . "$panel_conf"
+
 open_pane() {
-  exec "$herdr_bin" plugin pane open \
+  local resp pane_id script_dir
+  resp="$("$herdr_bin" plugin pane open \
     --plugin herdr-lazygit \
     --entrypoint lazygit \
     --placement split \
     --direction right \
     --cwd "$target_dir" \
-    --focus
+    --focus 2>/dev/null || true)"
+  # narrow the fresh split down to a single-column sidebar
+  pane_id="$(printf '%s' "$resp" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin)["result"]["plugin_pane"]["pane"]["pane_id"])
+except Exception:
+    pass' || true)"
+  if [ -n "$pane_id" ]; then
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    python3 "$script_dir/layout-helper.py" set-width "$pane_id" "$SIDEBAR_COLS" 2>/dev/null || true
+  fi
+  exit 0
 }
 
 # --- compute the OPEN/FOCUS/CLOSE decision ----------------------------------

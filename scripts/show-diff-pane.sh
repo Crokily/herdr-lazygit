@@ -52,60 +52,52 @@ esac
 
 view_cmd="$base_cmd | $pager"
 
-# --- close the previous GitDiff pane, pick the widest pane as split target -
-# One python call: `pane layout --pane <me>` gives every pane in this tab with
-# its rect; `pane list` supplies the labels (to spot the old GitDiff pane).
-plan="$(python3 - "$HERDR_TAB_ID" "$HERDR_PANE_ID" <<'PY'
-import json, subprocess, sys
-tab, me = sys.argv[1], sys.argv[2]
+# --- geometry: the diff opens as a wide pane RIGHT of the sidebar ----------
+# `pane split` can only divide the sidebar's own (narrow) rectangle, so after
+# splitting we use layout-helper.py (layout.set_split_ratio over the herdr
+# socket) to borrow width from the rest of the tab: the (git|diff) region
+# grows to SIDEBAR_COLS+diff_cols, split SIDEBAR_COLS / diff_cols. Before the
+# pager exits, the region shrinks back to SIDEBAR_COLS, so closing the diff
+# leaves the sidebar at its configured width.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+helper="$script_dir/layout-helper.py"
 
-def run(*args):
-    out = subprocess.run(["herdr", *args], capture_output=True, text=True)
-    try:
-        return json.loads(out.stdout)["result"]
-    except Exception:
-        return {}
+SIDEBAR_COLS=42
+DIFF_COLS=""   # empty -> 45% of the tab width
+panel_conf="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}/panel.conf"
+# shellcheck disable=SC1090
+[ -f "$panel_conf" ] && . "$panel_conf"
 
-labels = {p["pane_id"]: p.get("label") or ""
-          for p in run("pane", "list").get("panes", [])
-          if p.get("tab_id") == tab}
-layout_panes = run("pane", "layout", "--pane", me).get("layout", {}).get("panes", [])
+# close the previous GitDiff pane in this tab (only ever one at a time)
+panes_json="$(herdr pane list 2>/dev/null || true)"
+printf '%s' "$panes_json" | python3 -c '
+import json, sys
+tab = sys.argv[1]
+try:
+    panes = json.load(sys.stdin)["result"]["panes"]
+except Exception:
+    panes = []
+for p in panes:
+    if p.get("tab_id") == tab and p.get("label") == "GitDiff":
+        print(p["pane_id"])
+' "$HERDR_TAB_ID" | while read -r old; do herdr pane close "$old" >/dev/null 2>&1 || true; done
 
-for pid, label in labels.items():
-    if label == "GitDiff":
-        print("CLOSE", pid)
-
-best, best_w = None, -1
-for p in layout_panes:
-    pid = p["pane_id"]
-    if pid == me or labels.get(pid) == "GitDiff":
-        continue
-    w = p.get("rect", {}).get("width", 0) or 0
-    if w > best_w:
-        best, best_w = pid, w
-if best:
-    print("SPLIT", best, "right")
-else:
-    print("SPLIT", me, "down")  # sidebar alone in its tab: stack the diff below
-PY
-)"
-
-split_target="" ; split_dir="down"
-while read -r verb a b; do
-  case "$verb" in
-    CLOSE) herdr pane close "$a" >/dev/null 2>&1 || true ;;
-    SPLIT) split_target="$a"; split_dir="$b" ;;
-  esac
-done <<EOF
-$plan
-EOF
-[ -n "$split_target" ] || { echo "show-diff-pane.sh: no split target" >&2; exit 1; }
+if [ -z "$DIFF_COLS" ]; then
+  tab_w="$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["result"]["layout"]["area"]["width"])' || echo 0)"
+  DIFF_COLS=$(( tab_w * 45 / 100 ))
+fi
+[ "$DIFF_COLS" -ge 20 ] || DIFF_COLS=60
 
 # --- open the pane and run the diff ----------------------------------------
-new_pane="$(herdr pane split --pane "$split_target" --direction "$split_dir" --ratio 0.5 --focus 2>/dev/null \
+new_pane="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 [ -n "$new_pane" ] || { echo "show-diff-pane.sh: pane split failed" >&2; exit 1; }
 
 herdr pane rename "$new_pane" "GitDiff" >/dev/null 2>&1 || true
-# "; exit" makes quitting the pager close the pane itself
-herdr pane run "$new_pane" "clear; $view_cmd; exit" >/dev/null
+python3 "$helper" place-diff "$HERDR_PANE_ID" "$new_pane" "$SIDEBAR_COLS" "$DIFF_COLS" 2>/dev/null || true
+
+# restore the sidebar width before exiting; "; exit" closes the pane on q
+restore_cmd="python3 $(printf %q "$helper") set-region-width $(printf %q "$HERDR_PANE_ID") $(printf %q "$SIDEBAR_COLS")"
+herdr pane run "$new_pane" "clear; $view_cmd; $restore_cmd >/dev/null 2>&1; exit" >/dev/null
