@@ -1,0 +1,41 @@
+# herdr-plugin.toml — manifest for the herdr-lazygit plugin.
+#
+# Opens lazygit in a herdr split pane (or its own tab) beside the user's current
+# work, with a bundled lazygit config layered under a per-user override file.
+# The pane appears ONLY in response to an explicit action — no event hooks.
+
+id = "herdr-lazygit"
+name = "herdr-lazygit"
+version = "0.1.0"
+description = "lazygit in a herdr split pane, with AI-assisted commit messages via custom commands."
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+
+# Install-time build step: make sure the `lazygit` binary is available
+# (install via Homebrew when possible, otherwise print instructions and fail).
+[[build]]
+command = ["/bin/sh", "scripts/ensure-lazygit.sh"]
+
+# The lazygit pane. The [[actions]] below summon it; run-lazygit.sh assembles the
+# layered LG_CONFIG_FILE (bundled config + user override) and then execs lazygit.
+[[panes]]
+id = "lazygit"
+title = "Git"
+placement = "split"
+command = ["bash", "scripts/run-lazygit.sh"]
+
+# Summon lazygit in a split beside the current pane. Idempotent within the
+# current tab: open if absent, focus if unfocused, close (toggle off) if focused.
+[[actions]]
+id = "open"
+title = "Open lazygit"
+description = "Open lazygit in a split pane beside the current work (focus/toggle on repeat)."
+command = ["bash", "scripts/open-lazygit.sh"]
+
+# The same pane, in its own tab. Idempotent across the current workspace's tabs:
+# open if absent, switch to its tab if elsewhere, focus/toggle in the current tab.
+[[actions]]
+id = "open-tab"
+title = "Open lazygit (tab)"
+description = "Open lazygit in its own tab (switch to it if already open, toggle off if focused)."
+command = ["bash", "scripts/open-lazygit-tab.sh"]

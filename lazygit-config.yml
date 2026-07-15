@@ -1,0 +1,55 @@
+# herdr-lazygit 捆绑的 lazygit 配置(基础层)
+#
+# 由 scripts/run-lazygit.sh 通过 LG_CONFIG_FILE 加载。
+# 用户覆盖层位于 $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml,
+# 那里的同名配置会覆盖本文件 —— 请不要直接改这个文件。
+#
+# 说明:
+# - 刻意保持克制,不改动 lazygit 默认键位,只新增 C / B 两个自定义命令。
+# - 不设置 gui.nerdFontsVersion(不假设用户装了 Nerd Font)。
+
+gui:
+  mouseEvents: true
+  showRandomTip: false
+
+customCommands:
+  # C — AI 生成 commit message(files 面板)
+  # 通过 menuFromCommand 调用 ai-commit-msg.sh candidates,
+  # 每行一个候选,选中后执行 git commit。
+  # 脚本的错误提示行以 "(" 开头(如 "(没有 staged 改动 …)"),
+  # 选中这类行时不会真正 commit,只把提示回显到 command log。
+  - key: 'C'
+    context: 'files'
+    description: 'AI 生成 commit message'
+    loadingText: '正在提交…'
+    output: 'log'
+    # 注意:lazygit 不会把命令交给 shell 展开,所以这里显式用 sh -c
+    # 包一层,让 $HERDR_LAZYGIT_ROOT 得以展开;选中值通过位置参数 $1
+    # 传入,避免引号转义问题。
+    prompts:
+      - type: 'menuFromCommand'
+        title: 'AI commit message 候选(生成中,可能需要几秒…)'
+        key: 'Msg'
+        command: "sh -c 'bash \"$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh\" candidates'"
+    command: >-
+      sh -c 'case "$1" in "("*) printf "%s\n" "$1" ;; *) git commit -m "$1" ;; esac' sh {{.Form.Msg | quote}}
+
+  # B — 切换 AI 后端(全局)
+  # 列出 ai-commit-msg.sh backends 的输出(名字<TAB>状态),
+  # 选中后写入 $HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf。
+  - key: 'B'
+    context: 'global'
+    description: '切换 AI commit 后端'
+    loadingText: '正在切换 AI 后端…'
+    output: 'popup'
+    outputTitle: 'AI 后端'
+    prompts:
+      - type: 'menuFromCommand'
+        title: '选择 AI 后端'
+        key: 'Backend'
+        command: "sh -c 'bash \"$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh\" backends'"
+        filter: '^(?P<name>[^\t]+)\t(?P<status>.*)$'
+        valueFormat: '{{ .name }}'
+        labelFormat: '{{ .name }} — {{ .status }}'
+    command: >-
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh" set-backend "$1"' sh {{.Form.Backend | quote}}
