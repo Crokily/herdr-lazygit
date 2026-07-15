@@ -38,18 +38,7 @@ out="$config_dir/generated.yml"
 # 插件三动词的默认键(设置页 settings-fzf.sh 的 DEF_KEY_* 必须与此保持一致)
 def_commit='C' ; def_zoom='U' ; def_settings=';'
 
-# --- 缓存:输入都没变就不重新生成 -------------------------------------------
 self="${BASH_SOURCE[0]:-$0}"
-if [ -f "$out" ] && [ ! "$self" -nt "$out" ] && [ ! "$script_dir/free-keys.py" -nt "$out" ]; then
-  if [ -f "$keys_conf" ]; then
-    [ "$keys_conf" -nt "$out" ] || exit 0
-  else
-    # keys.conf 不存在:只有当 generated.yml 确实由默认键生成(看头部
-    # marker 行)才可跳过——覆盖"用户手删 keys.conf 想恢复默认"的场景,
-    # 避免旧键残留。
-    grep -qxF "# keys: $def_commit $def_zoom $def_settings" "$out" 2>/dev/null && exit 0
-  fi
-fi
 
 # --- 读 keys.conf(缺省用默认) ---------------------------------------------
 # 在子 shell 里 source,坏文件(语法错误)不会打死本脚本,只会退回默认键。
@@ -64,6 +53,39 @@ fi
 [ -n "$k_commit" ]   || k_commit="$def_commit"
 [ -n "$k_zoom" ]     || k_zoom="$def_zoom"
 [ -n "$k_settings" ] || k_settings="$def_settings"
+
+# --- 键位合法性校验:非法值退回默认并告警,绝不写进 generated.yml -----------
+# lazygit 合法键 = 单字符,或 <...> 命名键(如 <c-s> <enter> <tab>)。
+# 多字符裸串(如 abc)会让 lazygit 启动即报 "Unrecognized key" 拒绝加载
+# (validation-error 屏,整个 lazygit pane 打不开),因此必须在生成前拦下,
+# 退回默认键(见 DESIGN.md 的优雅降级约定:非法值 = 回退默认 + 告警)。
+valid_key() {
+  case "$1" in
+    '<'*'>') [ ${#1} -ge 3 ] ;;   # 命名键 <...>
+    *)       [ ${#1} -eq 1 ] ;;   # 恰好一个字符
+  esac
+}
+warn_bad_key() {
+  printf 'gen-config-layer.sh: 非法键位 %s=%s,已退回默认 %s(合法键:单字符或 <...> 命名键)\n' \
+    "$1" "$2" "$3" >&2
+}
+valid_key "$k_commit"   || { warn_bad_key KEY_COMMIT   "$k_commit"   "$def_commit";   k_commit="$def_commit"; }
+valid_key "$k_zoom"     || { warn_bad_key KEY_ZOOM     "$k_zoom"     "$def_zoom";     k_zoom="$def_zoom"; }
+valid_key "$k_settings" || { warn_bad_key KEY_SETTINGS "$k_settings" "$def_settings"; k_settings="$def_settings"; }
+
+# --- 缓存:generated.yml 已反映这套(校验后的)键就不重新生成 ----------------
+# 用内容 marker 比对而非 mtime:bash 3.2 的 -nt 只比较整秒,同一秒内连续两次
+# 改键(设置页快速连改)会因 mtime 相同而漏更新,且该陈旧状态跨重启持续
+# (relaunch 时的 gen 也一并跳过)。直接比对头部 "# keys: ..." marker,与写入
+# 时刻无关,彻底规避该问题;keys.conf 删除想恢复默认的场景也一并覆盖
+# (此时 marker = 默认键行)。self / free-keys.py 变更仍用 -nt 兜底触发重生。
+marker="# keys: $k_commit $k_zoom $k_settings"
+if [ -f "$out" ] \
+   && grep -qxF "$marker" "$out" 2>/dev/null \
+   && [ ! "$self" -nt "$out" ] \
+   && [ ! "$script_dir/free-keys.py" -nt "$out" ]; then
+  exit 0
+fi
 
 # YAML 单引号转义('' 表示一个 ')
 yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }

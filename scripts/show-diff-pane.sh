@@ -60,7 +60,11 @@ case "$kind" in
   commit)
     # ^{commit} 顺带把 tag 剥成 commit;--quiet 抑制 stderr,失败走错误分支
     check_cmd="git -C $q_repo rev-parse --verify --quiet $(shq "${target}^{commit}") >/dev/null 2>&1"
-    base_cmd="$git_cmd show $q_target"
+    # -m --first-parent:合并提交默认 git show 不输出 diff(只有 header),
+    # 放大查看会一片空白。--first-parent 显示"相对第一父的引入差异"(最符合
+    # 直觉的"这次合并带进来了什么"),-m 强制对合并提交产出 diff;普通提交下
+    # 二者与裸 git show 输出完全一致(已实测),故无副作用。
+    base_cmd="$git_cmd show -m --first-parent $q_target"
     err_msg="无效的 commit: ${target}"
     ;;
   stash)

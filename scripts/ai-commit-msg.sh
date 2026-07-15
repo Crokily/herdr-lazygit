@@ -34,7 +34,7 @@ CONFIG_FILE="$CONFIG_DIR/ai-backend.conf"
 
 MSG_NO_STAGED="(没有 staged 改动 — 先用空格 stage 文件)"
 MSG_NO_BACKEND="(未找到可用的 AI CLI:claude/codex/opencode/gemini)"
-MSG_NO_CUSTOM_CMD="(custom 后端未配置 AI_CUSTOM_CMD — 编辑 ai-backend.conf 或按 B 换后端)"
+MSG_NO_CUSTOM_CMD="(custom 后端未配置 AI_CUSTOM_CMD — 编辑 ai-backend.conf 或在设置页换后端)"
 MSG_TIMEOUT="(AI 生成超时,请重试或换后端)"
 MSG_FAILED="(AI 生成失败,请检查后端登录状态或换后端)"
 
@@ -59,7 +59,7 @@ load_config() {
   fi
   AI_BACKEND="${AI_BACKEND:-auto}"
   AI_CUSTOM_CMD="${AI_CUSTOM_CMD:-}"
-  # 用户自定义 prompt(E 键编辑):存在且非空则覆盖内置 PROMPT
+  # 用户自定义 prompt(设置页编辑):存在且非空则覆盖内置 PROMPT
   if [ -s "$CONFIG_DIR/prompt.txt" ]; then
     PROMPT="$(cat "$CONFIG_DIR/prompt.txt")"
   fi
@@ -248,7 +248,7 @@ cmd_candidates() {
     case "$AI_BACKEND" in
       custom) printf '%s\n' "$MSG_NO_CUSTOM_CMD" ;;
       auto)   printf '%s\n' "$MSG_NO_BACKEND" ;;
-      *)      printf '(当前后端 %s 未安装 — 按 B 换后端)\n' "$AI_BACKEND" ;;
+      *)      printf '(当前后端 %s 未安装 — 在设置页换后端)\n' "$AI_BACKEND" ;;
     esac
     return 0
   fi
@@ -382,6 +382,11 @@ model_var_for() {
 # 第一行是当前值;能动态取列表的后端(opencode)动态取,其余给常用档。
 cmd_models() {
   local backend cur
+  # 先在本作用域 load_config:current_model_backend 在命令替换(子 shell)里
+  # source 配置,其设置的 AI_<BACKEND>_MODEL 不会回传到这里。不显式加载,
+  # 下面读到的就永远是文件顶部的硬编码默认值(如 haiku),导致设置页模型
+  # 选择器把"当前模型"标错。
+  load_config
   backend="$(current_model_backend)"
   if [ -z "$backend" ]; then
     echo "(当前后端不支持选模型 — custom 后端请直接改 AI_CUSTOM_CMD)"
