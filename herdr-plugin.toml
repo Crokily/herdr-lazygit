@@ -22,7 +22,11 @@ command = ["/bin/sh", "scripts/ensure-lazygit.sh"]
 id = "lazygit"
 title = "Git"
 placement = "split"
-command = ["bash", "scripts/run-lazygit.sh"]
+# NOTE: herdr spawns the pane command with cwd = the launcher's --cwd (the
+# user's work dir), NOT the plugin root — a bare relative "scripts/…" path
+# fails to resolve and the pane dies instantly. herdr injects
+# HERDR_PLUGIN_ROOT into the pane's environment, so locate the script there.
+command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/scripts/run-lazygit.sh\""]
 
 # Summon lazygit in a split beside the current pane. Idempotent within the
 # current tab: open if absent, focus if unfocused, close (toggle off) if focused.
