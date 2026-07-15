@@ -69,6 +69,39 @@ customCommands:
     command: >-
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" file "$1"' sh {{.SelectedPath | quote}}
 
+  # m — 选择当前 AI 后端的模型(files 面板;覆盖 files 无默认键位)
+  # 菜单列出候选(opencode 动态取列表,claude 给 haiku/sonnet/opus 常用档,
+  # codex/gemini 无列表命令只显示当前值),选中后进入可编辑输入框,
+  # 改或直接回车确认;留空 = 跟随该 CLI 自己的默认模型。
+  - key: 'm'
+    context: 'files'
+    description: '选择 AI commit 模型'
+    output: 'popup'
+    outputTitle: 'AI 模型'
+    prompts:
+      - type: 'menuFromCommand'
+        title: '选择模型(下一步还可手动修改)'
+        key: 'Pick'
+        command: "sh -c 'bash \"$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh\" models'"
+        filter: '^(?P<id>.+)$'
+        valueFormat: '{{ .id }}'
+        labelFormat: '{{ .id }}'
+      - type: 'input'
+        title: '模型 id(可编辑;留空 = 跟随 CLI 默认)'
+        key: 'Model'
+        initialValue: '{{.Form.Pick}}'
+    command: >-
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh" set-model "$1"' sh {{.Form.Model | quote}}
+
+  # E — 用 $EDITOR 编辑 AI prompt(保存后下一次 C 立即生效;
+  # 删除该文件则恢复内置默认 prompt)
+  - key: 'E'
+    context: 'files'
+    description: '编辑 AI commit prompt'
+    output: 'terminal'
+    command: >-
+      sh -c '"${EDITOR:-vim}" "$(bash "$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh" prompt-file)"'
+
   # v(小写)— 同 V,避免大小写踩空。代价:覆盖 files 面板默认的
   # range select(范围选择),但 Shift+↑/↓ 仍可完成同样操作。
   - key: 'v'

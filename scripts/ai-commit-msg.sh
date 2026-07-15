@@ -59,6 +59,23 @@ load_config() {
   fi
   AI_BACKEND="${AI_BACKEND:-auto}"
   AI_CUSTOM_CMD="${AI_CUSTOM_CMD:-}"
+  # 用户自定义 prompt(E 键编辑):存在且非空则覆盖内置 PROMPT
+  if [ -s "$CONFIG_DIR/prompt.txt" ]; then
+    PROMPT="$(cat "$CONFIG_DIR/prompt.txt")"
+  fi
+}
+
+# 更新 conf 里的单个 KEY=VALUE,保留其他行(set-backend 早期实现会整写
+# conf 丢掉别的键,这里统一走这个助手)。值以单引号安全转义写入。
+write_conf_var() {
+  local key="$1" value="$2" tmp
+  mkdir -p "$CONFIG_DIR"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/ai-backend.conf.XXXXXX")"
+  if [ -f "$CONFIG_FILE" ]; then
+    grep -v "^${key}=" "$CONFIG_FILE" > "$tmp" || true
+  fi
+  printf "%s='%s'\n" "$key" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")" >> "$tmp"
+  mv "$tmp" "$CONFIG_FILE"
 }
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -335,15 +352,74 @@ cmd_set_backend() {
     echo "再执行 set-backend custom。" >&2
     return 1
   fi
-  mkdir -p "$CONFIG_DIR"
-  {
-    printf 'AI_BACKEND=%s\n' "$name"
-    if [ -n "$AI_CUSTOM_CMD" ]; then
-      # 保留已有的 custom 命令(single-quote 安全转义)
-      printf "AI_CUSTOM_CMD='%s'\n" "$(printf '%s' "$AI_CUSTOM_CMD" | sed "s/'/'\\\\''/g")"
-    fi
-  } > "$CONFIG_FILE"
+  write_conf_var AI_BACKEND "$name"
   echo "AI 后端已设置为: $name"
+}
+
+# 当前(auto 时解析后的)后端名;custom/无可用后端时输出空
+current_model_backend() {
+  load_config
+  local b="$AI_BACKEND"
+  if [ "$b" = "auto" ]; then
+    b=""
+    for cand in $BACKEND_ORDER; do
+      if has_cmd "$cand"; then b="$cand"; break; fi
+    done
+  fi
+  case "$b" in claude|codex|opencode|gemini) printf '%s' "$b" ;; *) printf '' ;; esac
+}
+
+model_var_for() {
+  case "$1" in
+    claude)   echo AI_CLAUDE_MODEL ;;
+    codex)    echo AI_CODEX_MODEL ;;
+    opencode) echo AI_OPENCODE_MODEL ;;
+    gemini)   echo AI_GEMINI_MODEL ;;
+  esac
+}
+
+# models — 输出当前后端的候选模型,一行一个(菜单数据源)。
+# 第一行是当前值;能动态取列表的后端(opencode)动态取,其余给常用档。
+cmd_models() {
+  local backend cur
+  backend="$(current_model_backend)"
+  if [ -z "$backend" ]; then
+    echo "(当前后端不支持选模型 — custom 后端请直接改 AI_CUSTOM_CMD)"
+    return 0
+  fi
+  cur="$(eval "printf '%s' \"\${$(model_var_for "$backend")-}\"")"
+  [ -n "$cur" ] && printf '%s\n' "$cur"
+  case "$backend" in
+    claude)
+      printf '%s\n' haiku sonnet opus ;;
+    opencode)
+      opencode models 2>/dev/null || true ;;
+    codex|gemini)
+      # 无公开的列表命令;给一个占位项,用户在下一步输入框里改成真实 id
+      echo "(在下一步输入框填模型 id;清空 = 跟随 CLI 默认)" ;;
+  esac | grep -v "^${cur}\$" || true
+}
+
+# set-model VALUE — 为当前后端写入模型(空值 = 跟随该 CLI 自己的默认)
+cmd_set_model() {
+  local value="${1:-}" backend
+  backend="$(current_model_backend)"
+  if [ -z "$backend" ]; then
+    echo "当前后端不支持设置模型" >&2
+    return 1
+  fi
+  case "$value" in "("*) echo "已取消" ; return 0 ;; esac
+  write_conf_var "$(model_var_for "$backend")" "$value"
+  echo "$backend 的模型已设置为: ${value:-（CLI 默认）}"
+}
+
+# prompt-file — 确保用户 prompt 文件存在(首次用内置 PROMPT 播种),输出路径
+cmd_prompt_file() {
+  mkdir -p "$CONFIG_DIR"
+  if [ ! -f "$CONFIG_DIR/prompt.txt" ]; then
+    printf '%s\n' "$PROMPT" > "$CONFIG_DIR/prompt.txt"
+  fi
+  printf '%s\n' "$CONFIG_DIR/prompt.txt"
 }
 
 # ---------------------------------------------------------------------------
@@ -356,8 +432,11 @@ main() {
     candidates)  cmd_candidates ;;
     backends)    cmd_backends ;;
     set-backend) shift; cmd_set_backend "$@" ;;
+    models)      cmd_models ;;
+    set-model)   shift; cmd_set_model "$@" ;;
+    prompt-file) cmd_prompt_file ;;
     *)
-      echo "用法: ai-commit-msg.sh candidates|backends|set-backend NAME" >&2
+      echo "用法: ai-commit-msg.sh candidates|backends|set-backend NAME|models|set-model VALUE|prompt-file" >&2
       return 1
       ;;
   esac
