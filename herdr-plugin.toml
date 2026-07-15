@@ -16,6 +16,11 @@ platforms = ["linux", "macos"]
 [[build]]
 command = ["/bin/sh", "scripts/ensure-lazygit.sh"]
 
+# Install-time build step: make sure `fzf` is available (the in-pane settings
+# menu, scripts/settings-fzf.sh, is built on it).
+[[build]]
+command = ["/bin/sh", "scripts/ensure-fzf.sh"]
+
 # The lazygit pane. The [[actions]] below summon it; run-lazygit.sh assembles the
 # layered LG_CONFIG_FILE (bundled config + user override) and then execs lazygit.
 [[panes]]
