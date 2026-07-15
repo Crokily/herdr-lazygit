@@ -139,8 +139,9 @@ EOF
   cat <<'EOF'
     context: 'stash'
     description: '在 herdr pane 中放大查看 stash'
+    # 注意:Index 是 int,不能过 quote(template 会报 wrong type),裸插值即可
     command: >-
-      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" stash "$1"' sh {{.SelectedStashEntry.Index | quote}}
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" stash "$1"' sh {{.SelectedStashEntry.Index}}
 EOF
 
   # -- KEY_SETTINGS:插件设置面板(global)------------------------------------
