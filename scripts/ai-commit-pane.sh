@@ -10,6 +10,9 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC1091
+. "$script_dir/runtime-env.sh"
+FZF_BIN="$HERDR_LAZYGIT_FZF_BIN"
 AI_SH="$script_dir/ai-commit-msg.sh"
 repo="${1:-$(pwd)}"
 config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
@@ -64,15 +67,8 @@ fi
 clear
 printf 'herdr-lazygit · AI Commit\nBackend: %s  ·  Model: %s\n\n' "$backend_text" "$model"
 
-if ! command -v fzf >/dev/null 2>&1; then
-  cat >&2 <<'EOF'
-fzf is required for the AI commit candidate and message editor.
-
-Install it with:
-  brew install fzf
-
-Press any key to close...
-EOF
+if ! herdr_lazygit_require_runtime fzf; then
+  printf '\nPress any key to close...' >&2
   IFS= read -rsn1 _ || true
   exit 1
 fi
@@ -171,7 +167,7 @@ preview_cmd='msg={}; if [ -n "$msg" ]; then printf "\033[1m✏ %s\033[0m\n\n" "$
 
 fzf_out=""
 fzf_rc=0
-fzf_out="$(fzf --layout=reverse --no-multi --print-query \
+fzf_out="$("$FZF_BIN" --layout=reverse --no-multi --print-query \
   --prompt='Commit message > ' \
   --header='Enter=commit · type to edit/write · Esc=cancel' \
   --wrap --gap 1 --gap-line --highlight-line \

@@ -11,6 +11,7 @@ set -euo pipefail
 
 [ "${HERDR_ENV:-}" = "1" ] || { echo "toggle-expand.sh: not inside herdr" >&2; exit 1; }
 [ -n "${HERDR_PANE_ID:-}" ] || { echo "toggle-expand.sh: HERDR_PANE_ID is empty" >&2; exit 1; }
+herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 helper="$script_dir/layout-helper.py"
@@ -50,7 +51,7 @@ if [ "$LAYOUT_MODE" = "sidebar" ]; then
   # After expanding, leave at least 20 columns for the tab's other workspace.
   # In a normal tab (>=100 columns), also keep lazygit at least 80 columns wide.
   # When a narrower tab cannot satisfy both constraints, preserve the workspace.
-  tab_width="$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
+  tab_width="$("$herdr_bin" pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
 import json, sys
 try:
     print(int(json.load(sys.stdin)["result"]["layout"]["area"]["width"]))
@@ -73,4 +74,4 @@ python3 "$helper" set-width "$HERDR_PANE_ID" "$target_cols"
 
 # lazygit stats and hot-reloads all configuration on focus-in; inject the event
 # directly to switch the layout immediately.
-herdr pane send-text "$HERDR_PANE_ID" $'\x1b[I' >/dev/null
+"$herdr_bin" pane send-text "$HERDR_PANE_ID" $'\x1b[I' >/dev/null

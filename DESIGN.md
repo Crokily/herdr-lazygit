@@ -132,7 +132,33 @@ Two supporting conventions:
 - The settings interface always displays the message "Changes apply automatically when you return to the lazygit pane (hot reload)" to set user expectations.
 - `run-lazygit.sh` also runs the generator (idempotently) immediately before `exec`, ensuring cold starts and hot reloads see the same generated layer. There is one generation path and no competing source of truth.
 
-## 6. Strategic Boundaries and Stop Signals
+## 6. Reproducible Runtime Packaging
+
+The plugin treats lazygit and fzf as part of its tested runtime, not as mutable
+system dependencies. A GitHub install runs `scripts/install-runtime.sh`, which
+maps macOS/Linux and x86_64/ARM64 to pinned upstream release archives, verifies
+repository-pinned SHA-256 digests, and writes both executables to the managed
+plugin checkout's `bin/` directory. Runtime scripts resolve those files by
+absolute path through `runtime-env.sh`; they never invoke a same-named binary
+from the user's `PATH`.
+
+This is deliberately different from package-manager bootstrapping:
+
+- installation never invokes Homebrew, apt, dnf, pacman, or `sudo`;
+- the same plugin version uses the same lazygit/fzf versions everywhere;
+- key-conflict analysis and generated configuration target the binary that
+  actually runs;
+- reinstalling the plugin atomically replaces its managed checkout and runtime;
+- `plugin link` remains a development operation and requires running
+  `scripts/install-runtime.sh` manually because Herdr does not execute build
+  commands for linked plugins.
+
+The remaining host requirements are Herdr, Bash, Git, Python >= 3.7, standard
+archive/hash utilities, and either curl or wget. Python is an explicit runtime
+requirement because pane geometry, JSON handling, locking, timeout handling,
+and key analysis use its standard library.
+
+## 7. Strategic Boundaries and Stop Signals
 
 **Out of scope** (unreachable through the lazygit approach and therefore fake integration):
 

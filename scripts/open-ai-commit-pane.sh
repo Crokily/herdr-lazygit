@@ -5,8 +5,8 @@
 # pane:
 #   - one GitCommit instance per tab
 #   - open a COMMIT_COLS-wide pane to the right of the sidebar
-#   - explicitly pass the configuration directory and repository cwd to the
-#     new shell
+#   - explicitly pass the Herdr binary, configuration directory, and repository
+#     cwd to the new shell
 #   - restore the sidebar/expanded width from invocation before the UI exits;
 #     exit then closes the pane automatically
 #
@@ -14,6 +14,7 @@
 set -euo pipefail
 
 [ "${HERDR_ENV:-}" = "1" ] || { echo "open-ai-commit-pane.sh: not inside herdr" >&2; exit 1; }
+herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 helper="$script_dir/layout-helper.py"
@@ -48,7 +49,7 @@ case "$COMMIT_COLS" in *[!0-9]*|'') COMMIT_COLS=70 ;; esac
 restore_cols="$SIDEBAR_COLS"
 if [ "$LAYOUT_MODE" = "expanded" ]; then
   restore_cols="$EXPAND_COLS"
-  tab_width="$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
+  tab_width="$("$herdr_bin" pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
 import json, sys
 try:
     print(int(json.load(sys.stdin)["result"]["layout"]["area"]["width"]))
@@ -63,7 +64,7 @@ except Exception:
 fi
 
 # --- Single instance: close an existing GitCommit pane in this tab ----------
-panes_json="$(herdr pane list 2>/dev/null || true)"
+panes_json="$("$herdr_bin" pane list 2>/dev/null || true)"
 printf '%s' "$panes_json" | python3 -c '
 import json, sys
 tab = sys.argv[1]
@@ -74,20 +75,20 @@ except Exception:
 for p in panes:
     if p.get("tab_id") == tab and p.get("label") == "GitCommit":
         print(p["pane_id"])
-' "$HERDR_TAB_ID" | while read -r old; do herdr pane close "$old" >/dev/null 2>&1 || true; done
+' "$HERDR_TAB_ID" | while read -r old; do "$herdr_bin" pane close "$old" >/dev/null 2>&1 || true; done
 
 # --- Open the AI commit pane and apply its geometry -------------------------
-new_pane="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
+new_pane="$("$herdr_bin" pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 [ -n "$new_pane" ] || { echo "open-ai-commit-pane.sh: pane split failed" >&2; exit 1; }
 
-herdr pane rename "$new_pane" "GitCommit" >/dev/null 2>&1 || true
+"$herdr_bin" pane rename "$new_pane" "GitCommit" >/dev/null 2>&1 || true
 python3 "$helper" place-diff "$HERDR_PANE_ID" "$new_pane" "$SIDEBAR_COLS" "$COMMIT_COLS" 2>/dev/null || true
 
 restore_cmd="python3 $(shq "$helper") set-region-width $(shq "$HERDR_PANE_ID") $(shq "$restore_cols")"
-run_cmd="clear; cd $(shq "$repo") && HERDR_PLUGIN_CONFIG_DIR=$(shq "$config_dir") bash $(shq "$commit_sh") $(shq "$repo"); $restore_cmd >/dev/null 2>&1; exit"
-if ! herdr pane run "$new_pane" "$run_cmd" >/dev/null; then
-  herdr pane close "$new_pane" >/dev/null 2>&1 || true
+run_cmd="clear; export HERDR_BIN_PATH=$(shq "$herdr_bin") HERDR_PLUGIN_CONFIG_DIR=$(shq "$config_dir"); cd $(shq "$repo") && bash $(shq "$commit_sh") $(shq "$repo"); $restore_cmd >/dev/null 2>&1; exit"
+if ! "$herdr_bin" pane run "$new_pane" "$run_cmd" >/dev/null; then
+  "$herdr_bin" pane close "$new_pane" >/dev/null 2>&1 || true
   python3 "$helper" set-region-width "$HERDR_PANE_ID" "$restore_cols" >/dev/null 2>&1 || true
   echo "open-ai-commit-pane.sh: pane run failed" >&2
   exit 1

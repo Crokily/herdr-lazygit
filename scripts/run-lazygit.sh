@@ -26,6 +26,9 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "$script_dir/.." && pwd)"
 export HERDR_LAZYGIT_ROOT="$PLUGIN_ROOT"
+# shellcheck disable=SC1091
+. "$script_dir/runtime-env.sh"
+herdr_lazygit_require_runtime lazygit
 
 # herdr injects HERDR_PLUGIN_CONFIG_DIR for plugin panes; fall back to a
 # sensible per-user dir so the script also works when run outside herdr.
@@ -75,4 +78,4 @@ fi
 layers="$layers,$user_config"
 
 export LG_CONFIG_FILE="$layers"
-exec lazygit
+exec "$HERDR_LAZYGIT_BIN"

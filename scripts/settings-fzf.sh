@@ -45,23 +45,13 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Dependency check: if fzf is missing, print installation instructions and exit
-# ---------------------------------------------------------------------------
-if ! command -v fzf >/dev/null 2>&1; then
-  cat >&2 <<'EOF'
-settings-fzf.sh: fzf is required for the settings menu.
-
-Install it with either command:
-  brew install fzf
-  bash "<plugin-directory>/scripts/ensure-fzf.sh"
-EOF
-  exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Constants and paths
+# Constants, paths, and plugin-private runtime
 # ---------------------------------------------------------------------------
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC1091
+. "$script_dir/runtime-env.sh"
+herdr_lazygit_require_runtime fzf
+FZF_BIN="$HERDR_LAZYGIT_FZF_BIN"
 SELF="$script_dir/settings-fzf.sh"
 AI_SH="$script_dir/ai-commit-msg.sh"
 GEN_SH="${HERDR_LAZYGIT_GEN_SH:-$script_dir/gen-config-layer.sh}"
@@ -270,7 +260,7 @@ cmd_preview() {
 # ---------------------------------------------------------------------------
 flow_backend() {
   local line name out rc
-  line="$("$AI_SH" backends 2>/dev/null | fzf \
+  line="$("$AI_SH" backends 2>/dev/null | "$FZF_BIN" \
       --layout=reverse --no-multi --cycle --tabstop=12 \
       --prompt='AI Backend > ' \
       --header='Enter/double-click = select · Esc = back' \
@@ -293,7 +283,7 @@ flow_backend() {
 # ---------------------------------------------------------------------------
 flow_model() {
   local out rc query sel value setout
-  out="$("$AI_SH" models 2>/dev/null | fzf \
+  out="$("$AI_SH" models 2>/dev/null | "$FZF_BIN" \
       --layout=reverse --no-multi --print-query \
       --prompt='AI Model > ' \
       --header='Enter = select; type an unlisted ID and press Enter · Esc = back' \
@@ -451,7 +441,7 @@ Enter/double-click = edit · Esc/q = exit'
       header="$header
 ✔ $MSG"
     fi
-    item="$(menu_items | fzf \
+    item="$(menu_items | "$FZF_BIN" \
         --layout=reverse --no-multi --cycle \
         --prompt='lazygit Settings > ' \
         --header="$header" \

@@ -44,7 +44,8 @@ def rpc(method, params):
 
 
 def cli(*args):
-    out = subprocess.run(["herdr", *args], capture_output=True, text=True)
+    herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
+    out = subprocess.run([herdr, *args], capture_output=True, text=True)
     return json.loads(out.stdout)["result"]
 
 
