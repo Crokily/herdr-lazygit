@@ -32,14 +32,15 @@ export HERDR_LAZYGIT_ROOT="$PLUGIN_ROOT"
 config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 mkdir -p "$config_dir"
 
-# 每次重新打开都从窄侧栏开始,不继承上一次 pane 留下的 expanded 状态。
-# 保留 panel.conf 里的其他宽度设置,只原子覆写 LAYOUT_MODE。
+# Start from the narrow sidebar every time instead of inheriting the expanded
+# state left by the previous pane. Preserve all other width settings in
+# panel.conf and atomically overwrite only LAYOUT_MODE.
 panel_conf="$config_dir/panel.conf"
 panel_tmp="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.panel.XXXXXX")"
 if [ -f "$panel_conf" ]; then
   grep -v '^LAYOUT_MODE=' "$panel_conf" > "$panel_tmp" || true
 else
-  printf '%s\n' '# panel.conf — herdr-lazygit 面板几何与布局状态。' > "$panel_tmp"
+  printf '%s\n' '# panel.conf — herdr-lazygit pane geometry and layout state.' > "$panel_tmp"
 fi
 printf "%s\n" "LAYOUT_MODE='sidebar'" >> "$panel_tmp"
 mv "$panel_tmp" "$panel_conf"
@@ -60,8 +61,10 @@ if [ ! -f "$user_config" ]; then
 EOF
 fi
 
-# 生成中间层(幂等,输入没变时是纯 stat 级开销);失败也不拦启动——
-# generated.yml 缺失时降级为「出厂 + 用户」两层,插件键位暂不可用而已。
+# Generate the intermediate layer (idempotent, with only stat-level overhead
+# when inputs are unchanged). Failure does not block startup: without
+# generated.yml, degrade to the bundled + user layers and temporarily lose only
+# plugin keybindings.
 bash "$script_dir/gen-config-layer.sh" || true
 
 generated="$config_dir/generated.yml"

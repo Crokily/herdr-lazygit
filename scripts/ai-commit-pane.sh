@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# ai-commit-pane.sh — GitCommit pane 内的即时反馈、可编辑 AI commit UI。
+# ai-commit-pane.sh — responsive, editable AI commit UI inside the GitCommit pane.
 #
-# 打开后先显示后端/模型与 spinner,后台运行 ai-commit-msg.sh candidates;
-# 成功后用 fzf 选择、编辑或自写 message,最后直接在传入仓库中提交。
-# Ctrl-C 在生成阶段会终止 AI 子进程并退出。
+# On opening, show the backend/model and a spinner, then run
+# ai-commit-msg.sh candidates in the background. On success, use fzf to select,
+# edit, or write a message, then commit directly in the supplied repository.
+# Ctrl-C terminates the AI child process and exits during generation.
 #
-# bash 3.2 兼容(macOS 默认)。
+# bash 3.2 compatible (macOS default).
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -15,13 +16,14 @@ config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-l
 ai_conf="$config_dir/ai-backend.conf"
 
 if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
-  printf 'herdr-lazygit:不是 git 仓库:%s\n\n按任意键关闭...' "$repo" >&2
+  printf 'herdr-lazygit: not a git repository: %s\n\nPress any key to close...' "$repo" >&2
   IFS= read -rsn1 _ || true
   exit 1
 fi
 cd "$repo"
 
-# 只读本地配置来生成即时状态行;不调用可能联网或较慢的模型列表命令。
+# Read only local configuration for the immediate status line; do not call
+# model-listing commands that may use the network or run slowly.
 AI_BACKEND_ENV="${AI_BACKEND:-}"
 AI_BACKEND=auto
 AI_CUSTOM_CMD=""
@@ -49,27 +51,27 @@ case "$resolved" in
   codex)    model="$AI_CODEX_MODEL" ;;
   opencode) model="$AI_OPENCODE_MODEL" ;;
   gemini)   model="$AI_GEMINI_MODEL" ;;
-  custom)   model="自定义命令" ;;
+  custom)   model="custom command" ;;
   *)        model="" ;;
 esac
-[ -n "$model" ] || model="CLI 默认"
+[ -n "$model" ] || model="CLI default"
 if [ "$AI_BACKEND" = "auto" ]; then
-  backend_text="auto → ${resolved:-未找到可用后端}"
+  backend_text="auto → ${resolved:-no available backend}"
 else
   backend_text="$AI_BACKEND"
 fi
 
 clear
-printf 'herdr-lazygit · AI Commit\n后端:%s  ·  模型:%s\n\n' "$backend_text" "$model"
+printf 'herdr-lazygit · AI Commit\nBackend: %s  ·  Model: %s\n\n' "$backend_text" "$model"
 
 if ! command -v fzf >/dev/null 2>&1; then
   cat >&2 <<'EOF'
-缺少 fzf(AI commit 候选与 message 编辑界面)。
+fzf is required for the AI commit candidate and message editor.
 
-安装方式:
+Install it with:
   brew install fzf
 
-按任意键关闭...
+Press any key to close...
 EOF
   IFS= read -rsn1 _ || true
   exit 1
@@ -90,7 +92,7 @@ cleanup() {
   rm -f "$candidates_file" "$error_file" "$commit_out" "$commit_err" "$preview_file"
 }
 cancel_generation() {
-  printf '\r\033[2K已取消 AI 生成。\n'
+  printf '\r\033[2KAI generation cancelled.\n'
   if [ -n "$ai_pid" ]; then
     kill "$ai_pid" >/dev/null 2>&1 || true
     wait "$ai_pid" >/dev/null 2>&1 || true
@@ -101,13 +103,15 @@ cancel_generation() {
 trap cleanup EXIT
 trap cancel_generation INT TERM
 
-# 预渲染"即将提交"预览(静态内容,只渲染一次,fzf preview 里 cat 即可):
-# 一行 shortstat 当标题,下面是 delta 渲染的完整 staged diff(滚轮可滚)。
-# 树状文件列表左边 lazygit 已有,这里只放侧栏单栏模式下看不到的东西。
+# Pre-render the "About to commit" preview once as static content so the fzf
+# preview can simply cat it: one shortstat title line followed by the complete
+# staged diff rendered by delta (scrollable). lazygit already shows the file
+# tree on the left; this contains only information hidden by single-column
+# sidebar mode.
 cols="$(tput cols 2>/dev/null || echo 80)"
 shortstat="$(git -C "$repo" diff --cached --shortstat | sed 's/^ *//')"
 {
-  printf '\033[1m%s\033[0m\n\n' "${shortstat:-无 staged 改动}"
+  printf '\033[1m%s\033[0m\n\n' "${shortstat:-nothing staged}"
   if command -v delta >/dev/null 2>&1; then
     git -C "$repo" diff --cached | delta --paging=never --width "$((cols > 4 ? cols - 2 : cols))" || true
   else
@@ -115,9 +119,10 @@ shortstat="$(git -C "$repo" diff --cached --shortstat | sed 's/^ *//')"
   fi
 } > "$preview_file" 2>/dev/null || true
 
-# 等待期先把提交规模亮出来,这几秒可以开始想 message 了
-printf '即将提交:%s\n\n' "${shortstat:-?}"
-printf '⏳ AI 生成中…(Ctrl-C 取消)'
+# Show the commit size while waiting so the user can start thinking about the
+# message during generation.
+printf 'About to commit: %s\n\n' "${shortstat:-?}"
+printf '⏳ Generating with AI… (Ctrl-C to cancel)'
 HERDR_PLUGIN_CONFIG_DIR="$config_dir" bash "$AI_SH" candidates \
   >"$candidates_file" 2>"$error_file" &
 ai_pid=$!
@@ -126,7 +131,7 @@ frames='|/-\'
 tick=0
 while kill -0 "$ai_pid" >/dev/null 2>&1; do
   frame="${frames:$((tick % 4)):1}"
-  printf '\r%s AI 生成中…(Ctrl-C 取消)' "$frame"
+  printf '\r%s Generating with AI… (Ctrl-C to cancel)' "$frame"
   tick=$((tick + 1))
   sleep 0.1
 done
@@ -139,41 +144,44 @@ printf '\r\033[2K'
 
 if [ "$gen_rc" -ne 0 ] && [ ! -s "$candidates_file" ]; then
   hint="$(tail -1 "$error_file" 2>/dev/null || true)"
-  printf '(AI 生成失败%s)\n' "${hint:+: $hint}" > "$candidates_file"
+  printf '(AI generation failed%s)\n' "${hint:+: $hint}" > "$candidates_file"
 fi
 
 first_line="$(sed -n '1p' "$candidates_file")"
 case "$first_line" in
   '('*)
-    printf '%s\n\n按任意键关闭...' "$first_line"
+    printf '%s\n\nPress any key to close...' "$first_line"
     IFS= read -rsn1 _ || true
     exit 0
     ;;
 esac
 
 if [ -z "$first_line" ]; then
-  printf '(AI 没有返回可用候选)\n\n按任意键关闭...'
+  printf '(AI returned no usable candidates)\n\nPress any key to close...'
   IFS= read -rsn1 _ || true
   exit 0
 fi
 
-# preview:上半是选中候选的完整 message(永不截断),下半 cat 预渲染的
-# staged diff。{} 由 fzf 以安全引号替换;列表过滤到空时显示自写提示。
+# Preview: the upper section contains the full selected message (never
+# truncated), and the lower section cats the pre-rendered staged diff. fzf
+# replaces {} with safe quoting; when filtering empties the list, show a hint
+# for writing a message from scratch.
 q_preview_file="$(python3 -c 'import shlex,sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$preview_file")"
-preview_cmd='msg={}; if [ -n "$msg" ]; then printf "\033[1m✏ %s\033[0m\n\n" "$msg"; else printf "\033[1m✏ (输入框内容将作为 message)\033[0m\n\n"; fi; cat '"$q_preview_file"
+preview_cmd='msg={}; if [ -n "$msg" ]; then printf "\033[1m✏ %s\033[0m\n\n" "$msg"; else printf "\033[1m✏ (the input will be used as the message)\033[0m\n\n"; fi; cat '"$q_preview_file"
 
 fzf_out=""
 fzf_rc=0
 fzf_out="$(fzf --layout=reverse --no-multi --print-query \
   --prompt='Commit message > ' \
-  --header='回车=提交 · 直接打字=编辑/自写 · Esc=取消' \
+  --header='Enter=commit · type to edit/write · Esc=cancel' \
   --wrap --gap 1 --gap-line --highlight-line \
   --preview "$preview_cmd" \
   --preview-window 'down,65%,wrap' \
-  --preview-label '─ 即将提交 ' \
+  --preview-label '─ About to commit ' \
   --bind 'double-click:accept' < "$candidates_file")" || fzf_rc=$?
 
-# Esc/中断返回 >=2;无匹配但保留 query 时 fzf 可返回 1,仍按 query 提交。
+# Esc/interruption returns >=2. fzf may return 1 when the query remains but no
+# item matches; still commit using that query.
 if [ "$fzf_rc" -ge 2 ]; then
   exit 0
 fi
@@ -184,12 +192,12 @@ message="$(printf '%s' "$message" | python3 -c 'import sys; sys.stdout.write(sys
 [ -n "$message" ] || exit 0
 
 clear
-printf '正在提交:%s\n\n' "$message"
+printf 'Committing: %s\n\n' "$message"
 if git -C "$repo" commit -m "$message" >"$commit_out" 2>"$commit_err"; then
   short_hash="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || true)"
-  printf '✓ 已提交 %s\n%s\n' "$short_hash" "$message"
+  printf '✓ Committed %s\n%s\n' "$short_hash" "$message"
 else
-  printf '✗ git commit 失败:\n'
+  printf '✗ git commit failed:\n'
   if [ -s "$commit_err" ]; then
     cat "$commit_err"
   else

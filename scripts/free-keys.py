@@ -1,50 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""free-keys.py — lazygit 空闲键分析(herdr-lazygit 插件选键的数据源)。
+"""free-keys.py — lazygit free-key analysis, the data source used to choose
+keys for the herdr-lazygit plugin.
 
-数据源:`lazygit --config` 打印的默认配置里的 keybinding 段(随机器上安装的
-lazygit 版本走,不硬编码键表)。只用标准库,自带一个针对该输出的小型缩进
-解析器(不引 PyYAML)。
+Data source: the keybinding section of the default configuration printed by
+`lazygit --config` (following the installed lazygit version rather than a
+hard-coded key table). Uses only the standard library and includes a small
+indentation-based parser for that output instead of PyYAML.
 
-用法:
+Usage:
   free-keys.py [report] [KEY ...]
-      打印候选键 × 面板 的占用矩阵。不给 KEY 时用 DECISIONS 里的候选集
-      (Z U X <c-s> O ';' ',' 以及现有的 C v V),并按候选顺序给出
-      KEY_ZOOM / KEY_SETTINGS 的默认键结论。
+      Print a candidate-key × panel occupancy matrix. With no KEY arguments,
+      use the DECISIONS candidates (Z U X <c-s> O ';' ',' plus existing C v V)
+      and report default-key conclusions for KEY_ZOOM / KEY_SETTINGS in
+      candidate order.
 
   free-keys.py check KEY context [context ...]
-      校验 KEY 在给定 customCommands context 里是否空闲。
-      context 取 lazygit customCommands 的 context 名(files / commits /
-      subCommits / reflogCommits / stash / localBranches / global …)。
-      每个冲突输出一行(stdout,TAB 分隔):
+      Check whether KEY is unused in the given customCommands contexts.
+      Contexts use lazygit customCommands names (files / commits / subCommits /
+      reflogCommits / stash / localBranches / global …).
+      Output one line per conflict to stdout, separated by a TAB:
           <context>\t<section>.<action>
-      退出码:0 = 全部空闲;1 = 有冲突;2 = 参数错误 / 拿不到 lazygit 配置。
+      Exit codes: 0 = all free; 1 = conflict; 2 = invalid arguments or unable
+      to obtain the lazygit configuration.
 
-选键规则(用户拍板,见 DESIGN.md):插件键不得遮蔽 lazygit 内置键。
-lazygit 按键优先级为 同面板 custom > 同面板内置 > global custom > global 内置,
-所以"空闲"的定义是:该键在目标面板的 keybinding 段和 universal 段都没有
-内置绑定(global context 则要求所有段全空)。
+Key-selection rule (user-approved; see DESIGN.md): plugin keys must not shadow
+built-in lazygit keys. lazygit key precedence is panel custom > panel built-in >
+global custom > global built-in, so "free" means that the key has no built-in
+binding in either the target panel's keybinding section or the universal section
+(the global context requires it to be unused in every section).
 
-已知的、被明确接受的例外:KEY_COMMIT 默认 C 遮蔽 files 面板低频的
-commitChangesWithEditor(记录于 DESIGN.md)。因此设置页在"新键 == 当前键"
-时应直接接受,不必再过 check。
+A known, explicitly accepted exception: default KEY_COMMIT C shadows the
+infrequently used commitChangesWithEditor action in the files panel (documented
+in DESIGN.md). Settings should therefore accept "new key == current key"
+without running check again.
 
-分析结论(lazygit 0.63.0,写入 DESIGN.md 附录):
-  KEY_ZOOM(Expand/global): Z ✗(universal.redo)→ U ✓(全面板空闲) => 默认 U
+Analysis conclusions (lazygit 0.63.0, recorded in the DESIGN.md appendix):
+  KEY_ZOOM (Expand/global): Z ✗ (universal.redo) → U ✓ (free in all panels) => default U
   KEY_SETTINGS: <c-s> ✗(universal.filteringMenu / confirmInEditor-alt)
                → O ✗(branches.viewPullRequestOptions)
-               → ; ✓(全面板空闲)                          => 默认 ;
+               → ; ✓ (free in all panels)                    => default ;
 """
 
 import re
 import subprocess
 import sys
 
-# customCommands 的 context 名 -> keybinding 段名。
-# subCommits / reflogCommits 与 commits 共用 keybinding.commits;
-# 分支侧栏的若干 context 共用 keybinding.branches。
+# customCommands context name -> keybinding section name.
+# subCommits / reflogCommits share keybinding.commits with commits; several
+# branch-sidebar contexts share keybinding.branches.
 CONTEXT_TO_SECTION = {
-    "global": None,  # None = 所有段
+    "global": None,  # None = all sections
     "status": "status",
     "files": "files",
     "worktrees": "worktrees",
@@ -61,21 +67,22 @@ CONTEXT_TO_SECTION = {
     "submodules": "submodules",
 }
 
-# 报告矩阵里展示的面板列(universal 永远参与判定)
+# Panel columns shown in the report matrix (universal always participates).
 REPORT_SECTIONS = ["universal", "files", "commits", "stash", "branches"]
 
-# DECISIONS 里的候选键(报告模式的默认输入)
+# DECISIONS candidates (default input in report mode).
 ZOOM_CANDIDATES = ["Z", "U", "X"]
 SETTINGS_CANDIDATES = ["<c-s>", "O", ";", ","]
 EXTRA_REPORT_KEYS = ["C", "v", "V"]
 
 
 def norm_key(raw):
-    """把键名归一成可比较的形式。
+    """Normalize a key name into a comparable form.
 
-    - 去引号后的单字符键原样保留(大小写敏感)
-    - <c-s> / <ctrl+s> / <alt-down> 等尖括号键:小写、按 -/+ 拆分,
-      修饰符别名归一(c->ctrl, a->alt, m->alt),修饰符排序后用 + 连接
+    - Preserve an unquoted single-character key as-is (case-sensitive).
+    - For angle-bracket keys such as <c-s> / <ctrl+s> / <alt-down>: lowercase,
+      split on -/+, normalize modifier aliases (c->ctrl, a->alt, m->alt), sort
+      modifiers, and join them with +.
     """
     k = raw.strip()
     if len(k) >= 2 and k[0] == k[-1] and k[0] in ("'", '"'):
@@ -84,7 +91,7 @@ def norm_key(raw):
         return k
     inner = k[1:-1].lower()
     parts = [p for p in re.split(r"[-+]", inner) if p != ""]
-    if not parts:  # 键本身是 '-' 或 '+' 之类(默认表里没有,防御)
+    if not parts:  # The key itself is '-' or '+' (not in defaults; defensive).
         return "<" + inner + ">"
     alias = {"c": "ctrl", "a": "alt", "m": "alt", "opt": "alt", "option": "alt"}
     mods = [alias.get(p, p) for p in parts[:-1]]
@@ -93,10 +100,11 @@ def norm_key(raw):
 
 
 def load_bindings():
-    """跑 lazygit --config,解析 keybinding 段。
+    """Run lazygit --config and parse its keybinding section.
 
-    返回 {section: {action: [norm_key, ...]}}。解析器只针对该输出的形状:
-    4 空格一级缩进、`action: value`、flow 列表 [a, b]、块列表 `- item`。
+    Return {section: {action: [norm_key, ...]}}. The parser targets only the
+    shape of this output: four spaces per indentation level, `action: value`,
+    flow lists [a, b], and block lists with `- item`.
     """
     try:
         out = subprocess.run(
@@ -104,14 +112,14 @@ def load_bindings():
             capture_output=True, text=True, check=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError) as e:
-        sys.stderr.write("free-keys.py: 无法执行 `lazygit --config`(%s);"
-                         "请先运行 scripts/ensure-lazygit.sh\n" % e)
+        sys.stderr.write("free-keys.py: unable to run `lazygit --config` (%s); "
+                         "run scripts/ensure-lazygit.sh first\n" % e)
         sys.exit(2)
 
     sections = {}
     in_kb = False
     section = None
-    action = None  # 正在收集块列表的 action
+    action = None  # Action whose block list is currently being collected.
     for line in out.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -128,7 +136,7 @@ def load_bindings():
             sections[section] = {}
             action = None
         elif indent == 8 and section is not None:
-            if stripped.endswith(":"):           # 块列表开头,如 jumpToBlock:
+            if stripped.endswith(":"):           # Block-list start, e.g. jumpToBlock:
                 action = stripped[:-1]
                 sections[section][action] = []
             else:
@@ -143,14 +151,14 @@ def load_bindings():
         elif indent > 8 and stripped.startswith("- ") and action and section:
             sections[section][action].append(norm_key(stripped[2:]))
     if "universal" not in sections:
-        sys.stderr.write("free-keys.py: 未能从 lazygit --config 解析出 "
-                         "keybinding.universal 段,lazygit 输出格式可能已变化\n")
+        sys.stderr.write("free-keys.py: could not parse keybinding.universal "
+                         "from `lazygit --config`; the output format may have changed\n")
         sys.exit(2)
     return sections
 
 
 def occupants(bindings, key, section):
-    """返回 [(section, action)]:key 在指定段里的内置绑定(段不存在=空)。"""
+    """Return [(section, action)] built-ins for key in one section (missing = empty)."""
     nk = norm_key(key)
     found = []
     for act, keys in bindings.get(section, {}).items():
@@ -160,12 +168,12 @@ def occupants(bindings, key, section):
 
 
 def sections_for_context(bindings, ctx):
-    """context -> 需要检查的 keybinding 段列表(总是含 universal)。"""
+    """Map context to keybinding sections to check (always includes universal)."""
     if ctx == "global":
         return list(bindings.keys())
     sec = CONTEXT_TO_SECTION.get(ctx)
     if sec is None:
-        sys.stderr.write("free-keys.py: 未知 context '%s'(可用:%s)\n"
+        sys.stderr.write("free-keys.py: unknown context '%s' (available: %s)\n"
                          % (ctx, " ".join(sorted(CONTEXT_TO_SECTION))))
         sys.exit(2)
     out = ["universal"]
@@ -176,7 +184,7 @@ def sections_for_context(bindings, ctx):
 
 def cmd_check(argv):
     if len(argv) < 2:
-        sys.stderr.write("用法: free-keys.py check KEY context [context ...]\n")
+        sys.stderr.write("Usage: free-keys.py check KEY context [context ...]\n")
         sys.exit(2)
     key, contexts = argv[0], argv[1:]
     bindings = load_bindings()
@@ -194,7 +202,7 @@ def cmd_check(argv):
 
 
 def first_free(bindings, candidates, contexts):
-    """按候选顺序找第一个在所有 contexts 空闲的键;返回 (key, 淘汰说明列表)。"""
+    """Find the first candidate free in all contexts; return (key, rejection notes)."""
     notes = []
     for cand in candidates:
         occupied = []
@@ -219,7 +227,7 @@ def cmd_report(keys):
                 keys.append(k)
 
     width = max(len(k) for k in keys) + 2
-    header = "键".ljust(width)
+    header = "Key".ljust(width)
     for sec in REPORT_SECTIONS:
         header += sec.ljust(14)
     print(header)
@@ -236,14 +244,14 @@ def cmd_report(keys):
     zoom_ctx = ["global"]
     zoom, zoom_notes = first_free(bindings, ZOOM_CANDIDATES, zoom_ctx)
     setk, set_notes = first_free(bindings, SETTINGS_CANDIDATES, ["global"])
-    print("KEY_ZOOM 候选(context: %s):" % " ".join(zoom_ctx))
+    print("KEY_ZOOM candidates (context: %s):" % " ".join(zoom_ctx))
     for n in zoom_notes:
         print("  " + n)
-    print("KEY_SETTINGS 候选(context: global):")
+    print("KEY_SETTINGS candidates (context: global):")
     for n in set_notes:
         print("  " + n)
     print()
-    print("结论: KEY_ZOOM=%s  KEY_SETTINGS=%s" % (zoom or "无可用候选!", setk or "无可用候选!"))
+    print("Conclusion: KEY_ZOOM=%s  KEY_SETTINGS=%s" % (zoom or "no available candidate!", setk or "no available candidate!"))
 
 
 def main():

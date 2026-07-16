@@ -1,10 +1,11 @@
 #!/bin/sh
-# [[build]] step:make sure `fzf` is available(设置页与 AI commit pane 的 UI)。
-# 由 herdr-plugin.toml 的 [[build]] 以 ["/bin/sh", "scripts/ensure-fzf.sh"] 调用
-# (manifest 条目由 builder-keymap 协调追加),所以保持 POSIX sh(no bashisms)。
-#   - fzf 已在 PATH   -> 跳过
-#   - 有 Homebrew     -> brew install fzf
-#   - 都没有          -> 打印安装指引并让 build 失败
+# [[build]] step: make sure `fzf` is available (UI for Settings and the AI
+# commit pane). Called by the [[build]] entry in herdr-plugin.toml as
+# ["/bin/sh", "scripts/ensure-fzf.sh"] (the manifest entry is appended through
+# builder-keymap coordination), so keep this POSIX sh-compatible (no bashisms).
+#   - fzf is on PATH  -> skip
+#   - Homebrew exists -> brew install fzf
+#   - neither exists  -> print installation instructions and fail the build
 set -eu
 
 if command -v fzf >/dev/null 2>&1; then

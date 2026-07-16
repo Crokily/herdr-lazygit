@@ -1,30 +1,36 @@
 #!/usr/bin/env bash
-# gen-config-layer.sh — 生成三层配置的中间层 generated.yml。
+# gen-config-layer.sh — generate the intermediate generated.yml layer in the
+# three-layer configuration model.
 #
-# 三层配置(见 DESIGN.md):
-#   lazygit-config.yml(出厂,随插件)
-#     → $HERDR_PLUGIN_CONFIG_DIR/generated.yml(本脚本生成,勿手改)
-#       → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml(用户手写,永远最后=永远赢)
+# Three configuration layers (see DESIGN.md):
+#   lazygit-config.yml (bundled with the plugin)
+#     → $HERDR_PLUGIN_CONFIG_DIR/generated.yml (generated here; do not edit)
+#       → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml (user-authored, always last
+#         and therefore always wins)
 #
-# 输入:$HERDR_PLUGIN_CONFIG_DIR/keys.conf(设置页写入,shell 可 source),
-# 以及 panel.conf 的 LAYOUT_MODE(sidebar|expanded);缺失/缺项 = 用默认值:
+# Inputs: $HERDR_PLUGIN_CONFIG_DIR/keys.conf (written by Settings and
+# shell-sourceable) plus LAYOUT_MODE from panel.conf (sidebar|expanded).
+# Missing files/values use defaults:
 #   KEY_COMMIT=C   KEY_ZOOM=U   KEY_SETTINGS=';'
-# (U 与 ';' 来自 scripts/free-keys.py 对 lazygit 0.63.0 内置键的空闲键分析:
-#  Z 被 universal.redo 占用,<c-s> 被 universal.filteringMenu 占用,
-#  O 被 branches.viewPullRequestOptions 占用;U/';' 全面板零占用。)
+# (U and ';' come from scripts/free-keys.py's free-key analysis of built-in
+# lazygit 0.63.0 bindings: Z is occupied by universal.redo, <c-s> by
+# universal.filteringMenu, and O by branches.viewPullRequestOptions; U and ';'
+# are unused in every panel.)
 #
-# 输出:generated.yml,包含
-#   - gui:按 LAYOUT_MODE 生成 sidebar/expanded 两种 lazygit 布局
-#   - customCommands:KEY_COMMIT(打开 AI commit pane)、KEY_ZOOM(global,
-#     切换布局)、KEY_SETTINGS(global,调 open-settings-pane.sh)
-#   - keybinding:保留 KEY_SETTINGS 手写旧配置的按需 <disabled> 兼容逻辑。
-#     KEY_ZOOM / KEY_SETTINGS 现在都是 global;设置页会用 free-keys.py check
-#     拒绝任何面板冲突,默认 U / ';' 全面板空闲,正常不会生成本段。
+# Output: generated.yml containing
+#   - gui: sidebar/expanded lazygit layouts selected by LAYOUT_MODE
+#   - customCommands: KEY_COMMIT (opens AI commit pane), KEY_ZOOM (global,
+#     toggles layout), and KEY_SETTINGS (global, calls open-settings-pane.sh)
+#   - keybinding: conditional <disabled> compatibility for old handwritten
+#     KEY_SETTINGS configurations. KEY_ZOOM / KEY_SETTINGS are now global;
+#     Settings rejects any panel conflict through free-keys.py check. The
+#     defaults U / ';' are unused everywhere, so this section is normally absent.
 #
-# 幂等 + 毫秒级:generated.yml 比 keys.conf / 本脚本 / free-keys.py 都新时直接
-# 跳过;写文件走 tmp+mv,避免 lazygit 热重载读到半截文件。
+# Idempotent and millisecond-scale: skip when generated.yml is newer than
+# keys.conf, this script, and free-keys.py. Writes use tmp+mv so lazygit's hot
+# reload never reads a partial file.
 #
-# bash 3.2 兼容(macOS 默认)。
+# bash 3.2 compatible (macOS default).
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -35,13 +41,15 @@ keys_conf="$config_dir/keys.conf"
 panel_conf="$config_dir/panel.conf"
 out="$config_dir/generated.yml"
 
-# 插件三动词的默认键(设置页 settings-fzf.sh 的 DEF_KEY_* 必须与此保持一致)
+# Default keys for the plugin's three verbs (DEF_KEY_* in settings-fzf.sh must
+# remain synchronized with these values).
 def_commit='C' ; def_zoom='U' ; def_settings=';'
 
 self="${BASH_SOURCE[0]:-$0}"
 
-# --- 读 keys.conf(缺省用默认) ---------------------------------------------
-# 在子 shell 里 source,坏文件(语法错误)不会打死本脚本,只会退回默认键。
+# --- Read keys.conf (use defaults for missing values) -----------------------
+# Source it in a subshell so a broken file (syntax error) does not kill this
+# script and instead falls back to the default keys.
 k_commit="" ; k_zoom="" ; k_settings=""
 if [ -f "$keys_conf" ]; then
   eval "$(
@@ -54,7 +62,7 @@ fi
 [ -n "$k_zoom" ]     || k_zoom="$def_zoom"
 [ -n "$k_settings" ] || k_settings="$def_settings"
 
-# --- 读 panel.conf 的布局状态(非法值退回 sidebar) -------------------------
+# --- Read layout state from panel.conf (invalid values fall back to sidebar) -
 layout_mode=""
 if [ -f "$panel_conf" ]; then
   layout_mode="$(
@@ -67,31 +75,37 @@ case "$layout_mode" in
   *) layout_mode="sidebar" ;;
 esac
 
-# --- 键位合法性校验:非法值退回默认并告警,绝不写进 generated.yml -----------
-# lazygit 合法键 = 单字符,或 <...> 命名键(如 <c-s> <enter> <tab>)。
-# 多字符裸串(如 abc)会让 lazygit 启动即报 "Unrecognized key" 拒绝加载
-# (validation-error 屏,整个 lazygit pane 打不开),因此必须在生成前拦下,
-# 退回默认键(见 DESIGN.md 的优雅降级约定:非法值 = 回退默认 + 告警)。
+# --- Validate key syntax: warn and restore defaults for invalid values; never
+#     write invalid values to generated.yml ----------------------------------
+# Valid lazygit keys are a single character or a named <...> key (such as
+# <c-s>, <enter>, or <tab>). A bare multi-character string such as abc makes
+# lazygit fail at startup with "Unrecognized key" (the validation-error screen
+# prevents the entire lazygit pane from opening), so reject it before generation
+# and restore the default (see DESIGN.md's graceful-degradation rule: invalid
+# value = default + warning).
 valid_key() {
   case "$1" in
-    '<'*'>') [ ${#1} -ge 3 ] ;;   # 命名键 <...>
-    *)       [ ${#1} -eq 1 ] ;;   # 恰好一个字符
+    '<'*'>') [ ${#1} -ge 3 ] ;;   # named key <...>
+    *)       [ ${#1} -eq 1 ] ;;   # exactly one character
   esac
 }
 warn_bad_key() {
-  printf 'gen-config-layer.sh: 非法键位 %s=%s,已退回默认 %s(合法键:单字符或 <...> 命名键)\n' \
+  printf 'gen-config-layer.sh: invalid key %s=%s; restored default %s (valid keys: one character or a named <...> key)\n' \
     "$1" "$2" "$3" >&2
 }
 valid_key "$k_commit"   || { warn_bad_key KEY_COMMIT   "$k_commit"   "$def_commit";   k_commit="$def_commit"; }
 valid_key "$k_zoom"     || { warn_bad_key KEY_ZOOM     "$k_zoom"     "$def_zoom";     k_zoom="$def_zoom"; }
 valid_key "$k_settings" || { warn_bad_key KEY_SETTINGS "$k_settings" "$def_settings"; k_settings="$def_settings"; }
 
-# --- 缓存:generated.yml 已反映这套(校验后的)键就不重新生成 ----------------
-# 用内容 marker 比对而非 mtime:bash 3.2 的 -nt 只比较整秒,同一秒内连续两次
-# 改键(设置页快速连改)会因 mtime 相同而漏更新,且该陈旧状态跨重启持续
-# (relaunch 时的 gen 也一并跳过)。直接比对头部 "# keys: ..." marker,与写入
-# 时刻无关,彻底规避该问题;keys.conf 删除想恢复默认的场景也一并覆盖
-# (此时 marker = 默认键行)。self / free-keys.py 变更仍用 -nt 兜底触发重生。
+# --- Cache: do not regenerate when generated.yml already reflects the
+#     validated keys ---------------------------------------------------------
+# Compare a content marker rather than mtime: bash 3.2's -nt has one-second
+# precision, so two rapid key changes within the same second can share an mtime,
+# miss the update, and keep that stale state across restarts (where relaunch
+# generation also skips). Comparing the "# keys: ..." header marker is
+# independent of write time and eliminates this problem. It also covers deleting
+# keys.conf to restore defaults (the marker then becomes the default-key line).
+# Changes to this script or free-keys.py still trigger regeneration via -nt.
 marker="# keys: $k_commit $k_zoom $k_settings | layout: $layout_mode"
 if [ -f "$out" ] \
    && grep -qxF "$marker" "$out" 2>/dev/null \
@@ -100,7 +114,7 @@ if [ -f "$out" ] \
   exit 0
 fi
 
-# YAML 单引号转义('' 表示一个 ')
+# Escape YAML single quotes ('' represents one ').
 yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
 
 qc="$(yaml_quote "$k_commit")"
@@ -112,10 +126,11 @@ case "$layout_mode" in
   *)        side_panel_width="0.99" ;;
 esac
 
-# --- KEY_SETTINGS 的面板级冲突 → <disabled> ---------------------------------
-# free-keys.py check 输出 "<ctx>\t<section>.<action>";universal 段不用管
-# (global custom 本就压过 global 内置),只 disable 面板段的同键内置。
-# free-keys.py 不可用(exit 2)时静默跳过——文件必须照常生成。
+# --- Panel-level KEY_SETTINGS conflicts → <disabled> ------------------------
+# free-keys.py check outputs "<ctx>\t<section>.<action>". Ignore the universal
+# section (global custom already overrides global built-in), disabling only
+# same-key built-ins in panel sections. If free-keys.py is unavailable (exit 2),
+# skip silently; the file must still be generated.
 kb_section=""
 if command -v python3 >/dev/null 2>&1; then
   conflicts="$(python3 "$script_dir/free-keys.py" check "$k_settings" global 2>/dev/null || true)"
@@ -129,27 +144,29 @@ if command -v python3 >/dev/null 2>&1; then
       }
       END {
         if (cnt == 0) exit
-        printf "\n# KEY_SETTINGS(%s)与以下面板内置键冲突,已按需禁用内置键\n", KEY
-        printf "# (想还原:在设置页换一个空闲键)\n"
+        printf "\n# KEY_SETTINGS(%s) conflicts with these panel built-ins; disabled as needed\n", KEY
+        printf "# (to restore them, choose an unused key in Settings)\n"
         printf "keybinding:\n"
         for (i = 1; i <= cnt; i++) printf "  %s:\n%s", order[i], acts[order[i]]
       }' KEY="$k_settings")"
   fi
 fi
 
-# --- 生成 --------------------------------------------------------------------
+# --- Generate ----------------------------------------------------------------
 tmp="$out.tmp.$$"
 {
   cat <<'EOF'
-# generated.yml — machine-generated, do not edit(由 gen-config-layer.sh 生成)
+# generated.yml — machine-generated by gen-config-layer.sh; do not edit
 EOF
-  # marker 行:记录生成时用的键,供缓存判断"keys.conf 已删但本文件非默认键"
+  # Marker line: record generation keys so the cache can detect "keys.conf was
+  # deleted but this file still contains nondefault keys."
   printf '# keys: %s %s %s | layout: %s\n' \
     "$k_commit" "$k_zoom" "$k_settings" "$layout_mode"
   cat <<'EOF'
 #
-# 改键请走设置页(lazygit 里按设置键),或手改 keys.conf 后重开 lazygit。
-# 想覆盖这里的任何配置,写 lazygit-user.yml(它在本文件之后加载,永远赢)。
+# Change keys through Settings (press the Settings key in lazygit), or edit
+# keys.conf and reopen lazygit. Override any setting here in lazygit-user.yml,
+# which loads after this file and always wins.
 EOF
   printf 'gui:\n  sidePanelWidth: %s\n' "$side_panel_width"
   cat <<'EOF'
@@ -159,31 +176,31 @@ EOF
 customCommands:
 EOF
 
-  # -- KEY_COMMIT:打开即时反馈、可编辑的 AI commit pane(files 面板)---------
+  # -- KEY_COMMIT: open responsive, editable AI commit pane (files panel) -----
   printf '  - key: %s\n' "$qc"
   cat <<'EOF'
     context: 'files'
-    description: '打开 AI commit pane'
+    description: 'Open AI commit pane'
     output: 'none'
     command: >-
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/open-ai-commit-pane.sh"'
 EOF
 
-  # -- KEY_ZOOM:全局切换 sidebar / expanded 布局 ---------------------------
+  # -- KEY_ZOOM: globally toggle sidebar / expanded layout -------------------
   printf '\n  - key: %s\n' "$qz"
   cat <<'EOF'
     context: 'global'
-    description: '展开/收起 lazygit'
+    description: 'Expand/collapse lazygit'
     output: 'none'
     command: >-
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/toggle-expand.sh"'
 EOF
 
-  # -- KEY_SETTINGS:插件设置面板(global)------------------------------------
+  # -- KEY_SETTINGS: plugin settings pane (global) ---------------------------
   printf '\n  - key: %s\n' "$qs"
   cat <<'EOF'
     context: 'global'
-    description: '打开 herdr-lazygit 设置面板'
+    description: 'Open herdr-lazygit settings pane'
     command: >-
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/open-settings-pane.sh"'
 EOF

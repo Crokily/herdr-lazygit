@@ -1,57 +1,65 @@
 #!/usr/bin/env bash
-# settings-fzf.sh — herdr-lazygit 插件设置页(fzf 循环菜单)。
+# settings-fzf.sh — herdr-lazygit plugin settings page (fzf menu loop).
 #
-# 一般由 open-settings-pane.sh 在专属 herdr pane 里启动(它负责摆几何),
-# 也可以直接在任意终端手动运行。
+# Usually launched by open-settings-pane.sh in a dedicated herdr pane (which
+# manages the geometry), but it can also be run manually in any terminal.
 #
-# 交互模型:
-#   主菜单 = fzf 列表(preview 窗显示每项的当前值+说明);
-#   Enter / 鼠标双击 = 进入子流程修改;Esc / q = 退出设置页。
-#   子流程里 Esc(或 fzf 取消)= 放弃修改返回主菜单。
+# Interaction model:
+#   Main menu = fzf list (the preview shows each item's current value and help);
+#   Enter / double-click = open the editing flow; Esc / q = exit settings.
+#   Within a flow, Esc (or cancelling fzf) discards the change and returns.
 #
-# 子流程一览:
-#   AI 后端      → fzf 列表(数据:ai-commit-msg.sh backends)
-#   AI 模型      → fzf 列表(数据:ai-commit-msg.sh models)+ --print-query 手动输入
-#   AI Prompt    → $EDITOR 打开 prompt.txt(ai-commit-msg.sh prompt-file)
-#   键位:*      → 按下新键(read -rsn1),free-keys.py check 校验冲突,
-#                  冲突则显示占用方并拒绝(free-keys.py 未就绪时跳过校验)
-#   宽度         → read 数字校验,写 panel.conf(留空 = 恢复默认)
+# Available flows:
+#   AI Backend      → fzf list (data: ai-commit-msg.sh backends)
+#   AI Model        → fzf list (data: ai-commit-msg.sh models) plus manual input
+#                     through --print-query
+#   AI Prompt       → open prompt.txt in $EDITOR (ai-commit-msg.sh prompt-file)
+#   Keybinding: *   → press a new key (read -rsn1), then validate conflicts with
+#                     free-keys.py check; conflicts identify the owner and reject
+#                     the change (validation is skipped if free-keys.py is absent)
+#   Width           → read and validate a number, then write panel.conf
+#                     (blank = restore the default)
 #
-# 每次改动:立刻写入对应 conf,并调用 gen-config-layer.sh 重新生成
-# generated.yml(脚本未就绪时容错跳过)。lazygit 0.63+ 在终端重新获得焦点时
-# 会热重载全部配置文件,所以切回 lazygit pane 改动即生效——无需重启。
+# Every change immediately writes the corresponding conf file and calls
+# gen-config-layer.sh to regenerate generated.yml (gracefully skipped if the
+# script is unavailable). lazygit 0.63+ hot-reloads all configuration files
+# when the terminal regains focus, so changes take effect when the user returns
+# to the lazygit pane without a restart.
 #
-# 配置文件(都在 $HERDR_PLUGIN_CONFIG_DIR,shell 可 source):
+# Configuration files (all under $HERDR_PLUGIN_CONFIG_DIR and shell-sourceable):
 #   ai-backend.conf  AI_BACKEND / AI_<BACKEND>_MODEL / AI_CUSTOM_CMD
-#   keys.conf        KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS(缺失 = 插件默认;
-#                    只存插件三动词的键,内置键重映射请编辑 lazygit-user.yml)
+#   keys.conf        KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS (missing = plugin
+#                    default; stores only the three plugin verb keys; edit
+#                    lazygit-user.yml to remap built-in keys)
 #   panel.conf       SIDEBAR_COLS / EXPAND_COLS / COMMIT_COLS / SETTINGS_COLS
 #                    / LAYOUT_MODE
 #
-# 测试钩子:HERDR_LAZYGIT_GEN_SH / HERDR_LAZYGIT_FREE_KEYS 可覆盖
-# gen-config-layer.sh / free-keys.py 的路径(自测用,平时不用设)。
+# Test hooks: HERDR_LAZYGIT_GEN_SH / HERDR_LAZYGIT_FREE_KEYS can override the
+# gen-config-layer.sh / free-keys.py paths (for self-tests; normally unset).
 #
-# 隐藏子命令:settings-fzf.sh preview <菜单项> —— 供 fzf --preview 回调自身。
+# Hidden subcommand: settings-fzf.sh preview <menu-item> — used by fzf's
+# --preview callback into this script.
 #
-# bash 3.2 兼容(macOS 默认);复杂解析用 python3,不引第三方库(fzf 除外)。
+# bash 3.2 compatible (macOS default); complex parsing uses python3 with no
+# third-party dependencies other than fzf.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# 依赖检查:没有 fzf 就给出安装指引并退出
+# Dependency check: if fzf is missing, print installation instructions and exit
 # ---------------------------------------------------------------------------
 if ! command -v fzf >/dev/null 2>&1; then
   cat >&2 <<'EOF'
-settings-fzf.sh: 缺少 fzf(设置页的菜单引擎)。
+settings-fzf.sh: fzf is required for the settings menu.
 
-安装方式(任选其一):
+Install it with either command:
   brew install fzf
-  bash "<插件目录>/scripts/ensure-fzf.sh"
+  bash "<plugin-directory>/scripts/ensure-fzf.sh"
 EOF
   exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# 常量与路径
+# Constants and paths
 # ---------------------------------------------------------------------------
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SELF="$script_dir/settings-fzf.sh"
@@ -59,8 +67,9 @@ AI_SH="$script_dir/ai-commit-msg.sh"
 GEN_SH="${HERDR_LAZYGIT_GEN_SH:-$script_dir/gen-config-layer.sh}"
 FREE_KEYS_PY="${HERDR_LAZYGIT_FREE_KEYS:-$script_dir/free-keys.py}"
 
-# 插件三动词的默认键——必须与 gen-config-layer.sh 的 def_commit/def_zoom/
-# def_settings 保持同一组值(那边是生成层的唯一真相,这里只做展示与比对)
+# Default keys for the plugin's three verbs. These must match def_commit,
+# def_zoom, and def_settings in gen-config-layer.sh (the generated layer's
+# source of truth); the values here are used only for display and comparison.
 DEF_KEY_COMMIT='C'
 DEF_KEY_ZOOM='U'
 DEF_KEY_SETTINGS=';'
@@ -70,18 +79,19 @@ AI_CONF="$CONFIG_DIR/ai-backend.conf"
 KEYS_CONF="$CONFIG_DIR/keys.conf"
 PANEL_CONF="$CONFIG_DIR/panel.conf"
 
-KEYS_CONF_HEADER='# keys.conf — herdr-lazygit 插件三动词的键位(设置页写入,gen-config-layer.sh 读取)。
-# 只存插件动词的键;想重映射 lazygit 内置键请编辑 lazygit-user.yml。'
-PANEL_CONF_HEADER='# panel.conf — herdr-lazygit 面板几何与布局状态。设置页和布局脚本写入。'
+KEYS_CONF_HEADER='# keys.conf — keys for the three herdr-lazygit plugin verbs (written by settings, read by gen-config-layer.sh).
+# Stores only plugin verb keys; edit lazygit-user.yml to remap built-in lazygit keys.'
+PANEL_CONF_HEADER='# panel.conf — herdr-lazygit pane geometry and layout state. Written by settings and layout scripts.'
 
-MSG=""        # 上一步操作的结果,显示在主菜单 header 里
-GEN_NOTE=""   # regen 的结果说明(拼进 MSG)
+MSG=""        # Result of the previous action, shown in the main-menu header
+GEN_NOTE=""   # Result note from regen, appended to MSG
 
 # ---------------------------------------------------------------------------
-# 工具函数
+# Utility functions
 # ---------------------------------------------------------------------------
 
-# 读入全部 conf(先设默认值再 source,模型默认值与 ai-commit-msg.sh 保持一致)
+# Load all conf files (set defaults before sourcing; model defaults must match
+# ai-commit-msg.sh).
 load_confs() {
   AI_BACKEND="auto"; AI_CUSTOM_CMD=""
   AI_CLAUDE_MODEL="haiku"; AI_CODEX_MODEL=""
@@ -97,7 +107,7 @@ load_confs() {
   { [ -f "$PANEL_CONF" ] && . "$PANEL_CONF"; } || true
 }
 
-# AI_BACKEND=auto 时按 ai-commit-msg.sh 的探测顺序解析出实际后端
+# Resolve AI_BACKEND=auto using ai-commit-msg.sh's detection order.
 resolved_backend() {
   local b="$AI_BACKEND" c
   if [ "$b" = "auto" ]; then
@@ -109,16 +119,17 @@ resolved_backend() {
   printf '%s' "$b"
 }
 
-# 首次创建 conf 时写入文件头注释
+# Write the header comment when creating a conf file for the first time.
 seed_conf() {
-  # $1=文件 $2=头部注释
+  # $1=file $2=header comment
   [ -f "$1" ] && return 0
   mkdir -p "$CONFIG_DIR"
   printf '%s\n' "$2" > "$1"
 }
 
-# 更新 conf 里的单个 KEY=VALUE,保留其他行;值以单引号安全转义写入
-# (与 ai-commit-msg.sh 的 write_conf_var 同款,但文件路径作参数)
+# Update one KEY=VALUE in a conf file while preserving other lines. Values are
+# safely escaped and written in single quotes (equivalent to write_conf_var in
+# ai-commit-msg.sh, but with the file path passed as an argument).
 conf_set() {
   local file="$1" key="$2" value="$3" tmp
   mkdir -p "$CONFIG_DIR"
@@ -130,7 +141,7 @@ conf_set() {
   mv "$tmp" "$file"
 }
 
-# 从 conf 里删掉某个 KEY(= 恢复默认)
+# Delete a KEY from a conf file (= restore its default).
 conf_del() {
   local file="$1" key="$2" tmp
   [ -f "$file" ] || return 0
@@ -139,55 +150,57 @@ conf_del() {
   mv "$tmp" "$file"
 }
 
-# 调生成层重建 generated.yml;脚本未就绪时容错跳过并在 GEN_NOTE 里提示
+# Rebuild generated.yml through the generation layer. If the script is absent,
+# skip gracefully and explain the result in GEN_NOTE.
 regen() {
   if [ -f "$GEN_SH" ]; then
     if bash "$GEN_SH" >/dev/null 2>&1; then
-      GEN_NOTE="已重新生成 generated.yml"
+      GEN_NOTE="regenerated generated.yml"
     else
-      GEN_NOTE="gen-config-layer.sh 执行失败(conf 已写入,可手动重跑排查)"
+      GEN_NOTE="gen-config-layer.sh failed (conf was written; rerun it manually to diagnose)"
     fi
   else
-    GEN_NOTE="生成层脚本未就绪,跳过重新生成(conf 已写入)"
+    GEN_NOTE="generation script unavailable; skipped regeneration (conf was written)"
   fi
 }
 
 pause() {
-  printf '\n按任意键返回菜单...'
+  printf '\nPress any key to return to the menu...'
   IFS= read -rsn1 _ || true
   printf '\n'
 }
 
 menu_items() {
   cat <<'EOF'
-AI 后端
-AI 模型
+AI Backend
+AI Model
 AI Prompt
-键位:Commit
-键位:展开
-键位:Settings
-侧栏宽度
-展开宽度
-AI 提交窗宽度
+Keybinding: Commit
+Keybinding: Expand
+Keybinding: Settings
+Sidebar Width
+Expanded Width
+AI Commit Pane Width
 EOF
 }
 
 # ---------------------------------------------------------------------------
-# preview 子命令:主菜单右侧/下方的"当前值 + 说明"(fzf --preview 回调)
+# preview subcommand: "current value + help" beside/below the main menu
+# (fzf --preview callback)
 # ---------------------------------------------------------------------------
 cmd_preview() {
   load_confs
   local item="${1:-}" b m pf
   case "$item" in
-    "AI 后端")
+    "AI Backend")
       b="$(resolved_backend)"
-      printf '当前:%s' "$AI_BACKEND"
-      [ "$AI_BACKEND" = "auto" ] && printf '(解析为 %s)' "${b:-无可用后端}"
+      printf 'Current: %s' "$AI_BACKEND"
+      [ "$AI_BACKEND" = "auto" ] && printf ' (resolved to %s)' "${b:-no available backend}"
       printf '\n\n'
       "$AI_SH" backends 2>/dev/null | awk -F'\t' '{printf "  %-10s %s\n", $1, $2}'
-      printf '\n说明:生成 commit message 用的 AI CLI。auto 按\nclaude>codex>opencode>gemini 顺序自动探测;custom 需在\nai-backend.conf 里配置 AI_CUSTOM_CMD。\n'
+      printf '\nAbout: The AI CLI used to generate commit messages. auto checks\nclaude > codex > opencode > gemini in order; custom requires\nAI_CUSTOM_CMD in ai-backend.conf.\n'
       ;;
-    "AI 模型")
+    "AI Model")
       b="$(resolved_backend)"
       case "$b" in
         claude)   m="$AI_CLAUDE_MODEL" ;;
@@ -196,127 +209,131 @@ cmd_preview() {
         gemini)   m="$AI_GEMINI_MODEL" ;;
         *)        m="" ;;
       esac
-      printf '当前后端:%s\n' "${b:-（无可用后端）}"
-      printf '当前模型:%s\n\n' "${m:-（跟随 CLI 默认）}"
-      printf '说明:commit message 是小活,默认刻意用便宜/快的档。\n列表选择或手动输入模型 id;custom 后端不支持选模型。\n'
+      printf 'Current backend: %s\n' "${b:-(no available backend)}"
+      printf 'Current model: %s\n\n' "${m:-(use CLI default)}"
+      printf 'About: Commit messages are a small task, so defaults favor cheap, fast models.\nChoose from the list or enter a model ID; custom does not support model selection.\n'
       ;;
     "AI Prompt")
       pf="$CONFIG_DIR/prompt.txt"
       if [ -s "$pf" ]; then
-        printf '文件:%s\n──────\n' "$pf"
+        printf 'File: %s\n──────\n' "$pf"
         head -8 "$pf"
-        printf '\n说明:用 $EDITOR 编辑生成 commit message 的 prompt,保存即生效。\n'
+        printf '\nAbout: Edit the commit-message prompt with $EDITOR. Saving takes effect immediately.\n'
       else
-        printf '尚未自定义(使用内置 prompt)。\n\n说明:Enter 后用 $EDITOR 打开,首次会以内置 prompt 播种。\n'
+        printf 'Not customized yet (using the built-in prompt).\n\nAbout: Press Enter to open it in $EDITOR; the built-in prompt seeds the file the first time.\n'
       fi
       ;;
-    "键位:Commit")
-      printf '当前:%s\n\n' "${KEY_COMMIT:-${DEF_KEY_COMMIT}(插件默认)}"
-      printf '说明:files 面板里触发 AI commit message 全流程。\n默认 C 遮蔽 lazygit 低频内置「用 git editor 提交」。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
+    "Keybinding: Commit")
+      printf 'Current: %s\n\n' "${KEY_COMMIT:-${DEF_KEY_COMMIT}(plugin default)}"
+      printf 'About: Starts the full AI commit-message flow in the files panel.\nThe default C shadows lazygit\x27s infrequently used "commit using git editor" action.\nfree-keys.py validates changes and rejects conflicts with built-in keys.\n'
       ;;
-    "键位:展开")
-      printf '当前:%s\n\n' "${KEY_ZOOM:-${DEF_KEY_ZOOM}(插件默认)}"
-      printf '说明:全局切换 lazygit 的侧栏/展开布局。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
+    "Keybinding: Expand")
+      printf 'Current: %s\n\n' "${KEY_ZOOM:-${DEF_KEY_ZOOM}(plugin default)}"
+      printf 'About: Globally toggles lazygit between sidebar and expanded layouts.\nfree-keys.py validates changes and rejects conflicts with built-in keys.\n'
       ;;
-    "键位:Settings")
-      printf '当前:%s\n\n' "${KEY_SETTINGS:-${DEF_KEY_SETTINGS}(插件默认)}"
-      printf '说明:全局键,打开本设置页。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
+    "Keybinding: Settings")
+      printf 'Current: %s\n\n' "${KEY_SETTINGS:-${DEF_KEY_SETTINGS}(plugin default)}"
+      printf 'About: Global key that opens this settings page.\nfree-keys.py validates changes and rejects conflicts with built-in keys.\n'
       ;;
-    "侧栏宽度")
+    "Sidebar Width")
       if [ -n "$SIDEBAR_COLS" ]; then
-        printf '当前:%s 列\n\n' "$SIDEBAR_COLS"
+        printf 'Current: %s columns\n\n' "$SIDEBAR_COLS"
       else
-        printf '当前:42 列(默认)\n\n'
+        printf 'Current: 42 columns (default)\n\n'
       fi
-      printf '说明:lazygit 侧栏 pane 的列数(panel.conf 的 SIDEBAR_COLS)。\n辅助 pane 关闭或 U 收起时会还原到这个宽度。\n'
+      printf 'About: Width of the lazygit sidebar pane (SIDEBAR_COLS in panel.conf).\nThis width is restored when a supporting pane closes or U collapses lazygit.\n'
       ;;
-    "展开宽度")
+    "Expanded Width")
       if [ -n "$EXPAND_COLS" ]; then
-        printf '当前:%s 列\n\n' "$EXPAND_COLS"
+        printf 'Current: %s columns\n\n' "$EXPAND_COLS"
       else
-        printf '当前:110 列(默认)\n\n'
+        printf 'Current: 110 columns (default)\n\n'
       fi
-      printf '说明:按展开键后 lazygit pane 的目标列数(panel.conf 的 EXPAND_COLS)。\n实际值会限制在 tab 总宽减 20 列以内。\n'
+      printf 'About: Target width after pressing Expand (EXPAND_COLS in panel.conf).\nThe actual width is capped at the total tab width minus 20 columns.\n'
       ;;
-    "AI 提交窗宽度")
+    "AI Commit Pane Width")
       if [ -n "$COMMIT_COLS" ]; then
-        printf '当前:%s 列\n\n' "$COMMIT_COLS"
+        printf 'Current: %s columns\n\n' "$COMMIT_COLS"
       else
-        printf '当前:70 列(默认)\n\n'
+        printf 'Current: 70 columns (default)\n\n'
       fi
-      printf '说明:AI commit 生成、编辑 pane 的列数(panel.conf 的 COMMIT_COLS)。\n'
+      printf 'About: Width of the AI commit generation and editing pane (COMMIT_COLS in panel.conf).\n'
       ;;
     *)
-      printf '(无预览)\n'
+      printf '(no preview)\n'
       ;;
   esac
 }
 
 # ---------------------------------------------------------------------------
-# 子流程:AI 后端(fzf 列表,数据来自 ai-commit-msg.sh backends)
+# Flow: AI backend (fzf list populated by ai-commit-msg.sh backends)
 # ---------------------------------------------------------------------------
 flow_backend() {
   local line name out rc
   line="$("$AI_SH" backends 2>/dev/null | fzf \
       --layout=reverse --no-multi --cycle --tabstop=12 \
-      --prompt='AI 后端 > ' \
-      --header='Enter/双击 = 选择 · Esc = 返回' \
+      --prompt='AI Backend > ' \
+      --header='Enter/double-click = select · Esc = back' \
       --bind 'double-click:accept')" && rc=0 || rc=$?
-  [ "$rc" -ne 0 ] && { MSG="已取消"; return 0; }
+  [ "$rc" -ne 0 ] && { MSG="Cancelled"; return 0; }
   name="$(printf '%s' "$line" | cut -f1)"
-  [ -n "$name" ] || { MSG="已取消"; return 0; }
+  [ -n "$name" ] || { MSG="Cancelled"; return 0; }
   if out="$("$AI_SH" set-backend "$name" 2>&1)"; then
     regen
     MSG="$out · $GEN_NOTE"
   else
     printf '%s\n' "$out"
     pause
-    MSG="切换后端失败(见上方提示)"
+    MSG="Failed to switch backend (see message above)"
   fi
 }
 
 # ---------------------------------------------------------------------------
-# 子流程:AI 模型(fzf 列表 + --print-query 支持手动输入模型 id)
+# Flow: AI model (fzf list + manual model-ID entry through --print-query)
 # ---------------------------------------------------------------------------
 flow_model() {
   local out rc query sel value setout
   out="$("$AI_SH" models 2>/dev/null | fzf \
       --layout=reverse --no-multi --print-query \
-      --prompt='AI 模型 > ' \
-      --header='Enter = 选择;列表没有的直接输入 id 再 Enter · Esc = 返回' \
+      --prompt='AI Model > ' \
+      --header='Enter = select; type an unlisted ID and press Enter · Esc = back' \
       --bind 'double-click:accept')" && rc=0 || rc=$?
-  # rc=1 是"无匹配但有输入"(--print-query 仍输出 query 行);rc>=2 才是取消/出错
-  if [ "$rc" -ge 2 ]; then MSG="已取消"; return 0; fi
+  # rc=1 means "no match but query present" (--print-query still emits the
+  # query line); only rc>=2 means cancellation/error.
+  if [ "$rc" -ge 2 ]; then MSG="Cancelled"; return 0; fi
   query="$(printf '%s\n' "$out" | sed -n 1p)"
   sel="$(printf '%s\n' "$out" | sed -n 2p)"
   value="${sel:-$query}"
-  [ -n "$value" ] || { MSG="已取消"; return 0; }
+  [ -n "$value" ] || { MSG="Cancelled"; return 0; }
   if setout="$("$AI_SH" set-model "$value" 2>&1)"; then
     regen
     MSG="$setout · $GEN_NOTE"
   else
     printf '%s\n' "$setout"
     pause
-    MSG="设置模型失败(见上方提示)"
+    MSG="Failed to set model (see message above)"
   fi
 }
 
 # ---------------------------------------------------------------------------
-# 子流程:AI Prompt($EDITOR 打开 prompt 文件)
+# Flow: AI Prompt (open the prompt file in $EDITOR)
 # ---------------------------------------------------------------------------
 flow_prompt() {
   local pf
   pf="$("$AI_SH" prompt-file)"
-  # EDITOR 可能带参数(如 "code -w"),按惯例不加引号让它分词
+  # EDITOR may contain arguments (such as "code -w"); leave it unquoted by
+  # convention so the shell splits those arguments.
   # shellcheck disable=SC2086
   ${EDITOR:-vi} "$pf" || true
   regen
-  MSG="prompt 已保存:$pf · $GEN_NOTE"
+  MSG="Prompt saved: $pf · $GEN_NOTE"
 }
 
 # ---------------------------------------------------------------------------
-# 子流程:改键位(read -rsn1 抓一个键,free-keys.py check 校验冲突)
-# 用法:flow_key <keys.conf 变量名> <默认键> <显示名> <free-keys 校验的 context...>
+# Flow: change a keybinding (capture one key with read -rsn1, then validate
+# conflicts with free-keys.py check).
+# Usage: flow_key <keys.conf variable> <default key> <display name>
+#        <contexts for free-keys validation...>
 # ---------------------------------------------------------------------------
 flow_key() {
   local var="$1" def="$2" label="$3"; shift 3
@@ -325,26 +342,29 @@ flow_key() {
   cur="$(eval "printf '%s' \"\$$var\"")"
   cur="${cur:-$def}"
   clear
-  printf '修改 [键位:%s]  (当前:%s)\n\n' "$label" "$cur"
-  printf '请按下新键 —— 支持字母/数字/符号,以及 Ctrl 组合(记作 <c-x>)。\n'
-  printf 'Esc = 取消。插件键不得遮蔽 lazygit 常用内置键,冲突会被拒绝。\n\n'
-  # 关闭流控让 Ctrl-S / Ctrl-Q 可被读到,读完恢复终端设置
+  printf 'Change [Keybinding: %s]  (current: %s)\n\n' "$label" "$cur"
+  printf 'Press a new key — letters, numbers, symbols, and Ctrl combinations (written as <c-x>) are supported.\n'
+  printf 'Esc = cancel. Plugin keys must not shadow common lazygit built-ins; conflicts are rejected.\n\n'
+  # Disable flow control so Ctrl-S / Ctrl-Q can be read, then restore terminal
+  # settings afterward.
   stty_saved="$(stty -g 2>/dev/null || true)"
   stty -ixon 2>/dev/null || true
   IFS= read -rsn1 key || key=$'\x1b'
   [ -n "$stty_saved" ] && stty "$stty_saved" 2>/dev/null || true
   if [ "$key" = $'\x1b' ]; then
-    # Esc 本身,或方向键等多字节转义序列:排掉残余字节后取消
+    # Esc itself, or a multibyte escape sequence such as an arrow key: drain
+    # the remaining bytes and cancel.
     while IFS= read -rsn1 -t 1 _; do :; done
-    MSG="已取消"
+    MSG="Cancelled"
     return 0
   fi
   if [ -z "$key" ]; then
-    MSG="Enter 不能设为插件键,已取消"
+    MSG="Enter cannot be assigned to a plugin action; cancelled"
     return 0
   fi
-  # 单字节 → lazygit 键位记法:可打印字符原样;Ctrl 组合记作 <c-x>;
-  # 空格/DEL 等一律拒绝(空格是 lazygit 的 stage 键)
+  # Convert one byte to lazygit key notation: printable characters stay as-is,
+  # while Ctrl combinations become <c-x>. Reject Space, DEL, and other values
+  # (Space is lazygit's stage key).
   notation="$(printf '%s' "$key" | python3 -c '
 import sys
 b = sys.stdin.buffer.read()
@@ -356,79 +376,84 @@ if len(b) == 1:
         sys.stdout.write("<c-%s>" % chr(c + 96))
 ')"
   if [ -z "$notation" ]; then
-    MSG="不支持的按键,已取消"
+    MSG="Unsupported key; cancelled"
     return 0
   fi
-  # 新键 == 当前键:直接放行不走 check(free-keys.py 文档字符串约定——
-  # 否则默认 C 这类"已接受的例外"会被自己的占用记录拒掉,永远改不回去)
+  # If the new key matches the current key, accept it without running check.
+  # This is part of free-keys.py's documented contract; otherwise accepted
+  # exceptions such as default C would be rejected by their own occupancy
+  # record and could never be restored.
   if [ "$notation" = "$cur" ]; then
-    MSG="[键位:$label] 与当前键相同($notation),未变化"
+    MSG="[Keybinding: $label] already uses $notation; no change"
     return 0
   fi
-  # 冲突校验:free-keys.py check KEY context...(非零退出 = 冲突/不可用)
+  # Conflict validation: free-keys.py check KEY context... (nonzero means a
+  # conflict or unavailable key).
   local check_note=""
   if [ -f "$FREE_KEYS_PY" ]; then
     if out="$(python3 "$FREE_KEYS_PY" check "$notation" "$@" 2>&1)"; then
       :
     else
-      printf '键 %s 与 lazygit 内置绑定冲突,已拒绝:\n%s\n' "$notation" "$out"
+      printf 'Key %s conflicts with a built-in lazygit binding and was rejected:\n%s\n' "$notation" "$out"
       pause
-      MSG="[键位:$label] 改键被拒绝:$notation 已被占用"
+      MSG="[Keybinding: $label] rejected: $notation is already in use"
       return 0
     fi
   else
-    check_note="(free-keys.py 未就绪,未校验冲突)"
+    check_note=" (free-keys.py unavailable; conflicts were not checked)"
   fi
   seed_conf "$KEYS_CONF" "$KEYS_CONF_HEADER"
   conf_set "$KEYS_CONF" "$var" "$notation"
   regen
-  MSG="[键位:$label] 已设为 $notation$check_note · $GEN_NOTE"
+  MSG="[Keybinding: $label] set to $notation$check_note · $GEN_NOTE"
 }
 
 # ---------------------------------------------------------------------------
-# 子流程:宽度(read 数字校验,写 panel.conf;留空 = 删除该项恢复默认)
-# 用法:flow_width <panel.conf 变量名> <显示名> <当前值描述> [最小值]
+# Flow: width (read and validate a number, then write panel.conf; blank deletes
+# the setting and restores the default).
+# Usage: flow_width <panel.conf variable> <display name> <current description>
+#        [minimum]
 # ---------------------------------------------------------------------------
 flow_width() {
   local var="$1" label="$2" cur="$3" min="${4:-20}" val
   clear
-  printf '修改 [%s]  (当前:%s)\n\n' "$label" "$cur"
-  printf '输入新列数(纯数字,%s–500;留空 = 恢复默认),Enter 确认:\n> ' "$min"
-  IFS= read -r val || { MSG="已取消"; return 0; }
+  printf 'Change [%s]  (current: %s)\n\n' "$label" "$cur"
+  printf 'Enter a new column count (digits only, %s–500; blank = restore default), then press Enter:\n> ' "$min"
+  IFS= read -r val || { MSG="Cancelled"; return 0; }
   if [ -z "$val" ]; then
     conf_del "$PANEL_CONF" "$var"
     regen
-    MSG="[$label] 已恢复默认 · $GEN_NOTE"
+    MSG="[$label] restored to default · $GEN_NOTE"
     return 0
   fi
   case "$val" in
-    *[!0-9]*) MSG="[$label] 输入无效(需要纯数字),未修改"; return 0 ;;
+    *[!0-9]*) MSG="[$label] invalid input (digits only); no change"; return 0 ;;
   esac
   if [ "$val" -lt "$min" ] || [ "$val" -gt 500 ]; then
-    MSG="[$label] $val 超出范围($min–500),未修改"
+    MSG="[$label] $val is outside the allowed range ($min–500); no change"
     return 0
   fi
   seed_conf "$PANEL_CONF" "$PANEL_CONF_HEADER"
   conf_set "$PANEL_CONF" "$var" "$val"
   regen
-  MSG="[$label] 已设为 $val 列 · $GEN_NOTE"
+  MSG="[$label] set to $val columns · $GEN_NOTE"
 }
 
 # ---------------------------------------------------------------------------
-# 主菜单循环
+# Main-menu loop
 # ---------------------------------------------------------------------------
 main_menu() {
   local header item
   while true; do
-    header='改动在切回 lazygit pane 时自动生效(热重载)
-Enter/双击 = 修改 · Esc/q = 退出'
+    header='Changes apply automatically when you return to the lazygit pane (hot reload)
+Enter/double-click = edit · Esc/q = exit'
     if [ -n "$MSG" ]; then
       header="$header
 ✔ $MSG"
     fi
     item="$(menu_items | fzf \
         --layout=reverse --no-multi --cycle \
-        --prompt='lazygit 设置 > ' \
+        --prompt='lazygit Settings > ' \
         --header="$header" \
         --preview="bash $(printf %q "$SELF") preview {}" \
         --preview-window='down,45%,wrap' \
@@ -436,23 +461,23 @@ Enter/双击 = 修改 · Esc/q = 退出'
         --bind 'q:abort')" || return 0
     MSG=""
     case "$item" in
-      "AI 后端")       flow_backend ;;
-      "AI 模型")       flow_model ;;
+      "AI Backend")       flow_backend ;;
+      "AI Model")         flow_model ;;
       "AI Prompt")     flow_prompt ;;
-      "键位:Commit")  flow_key KEY_COMMIT "$DEF_KEY_COMMIT" "Commit" files ;;
-      "键位:展开")    flow_key KEY_ZOOM "$DEF_KEY_ZOOM" "展开" global ;;
-      "键位:Settings") flow_key KEY_SETTINGS "$DEF_KEY_SETTINGS" "Settings" global ;;
-      "侧栏宽度")
+      "Keybinding: Commit")   flow_key KEY_COMMIT "$DEF_KEY_COMMIT" "Commit" files ;;
+      "Keybinding: Expand")   flow_key KEY_ZOOM "$DEF_KEY_ZOOM" "Expand" global ;;
+      "Keybinding: Settings") flow_key KEY_SETTINGS "$DEF_KEY_SETTINGS" "Settings" global ;;
+      "Sidebar Width")
         load_confs
-        flow_width SIDEBAR_COLS "侧栏宽度" "${SIDEBAR_COLS:-42(默认)}"
+        flow_width SIDEBAR_COLS "Sidebar Width" "${SIDEBAR_COLS:-42 (default)}"
         ;;
-      "展开宽度")
+      "Expanded Width")
         load_confs
-        flow_width EXPAND_COLS "展开宽度" "${EXPAND_COLS:-110(默认)}" 80
+        flow_width EXPAND_COLS "Expanded Width" "${EXPAND_COLS:-110 (default)}" 80
         ;;
-      "AI 提交窗宽度")
+      "AI Commit Pane Width")
         load_confs
-        flow_width COMMIT_COLS "AI 提交窗宽度" "${COMMIT_COLS:-70(默认)}" 40
+        flow_width COMMIT_COLS "AI Commit Pane Width" "${COMMIT_COLS:-70 (default)}" 40
         ;;
       "") return 0 ;;
     esac
@@ -460,13 +485,13 @@ Enter/双击 = 修改 · Esc/q = 退出'
 }
 
 # ---------------------------------------------------------------------------
-# 入口
+# Entry point
 # ---------------------------------------------------------------------------
 case "${1:-menu}" in
   preview) cmd_preview "${2:-}" ;;
   menu)    main_menu ;;
   *)
-    echo "用法: settings-fzf.sh [preview <菜单项>]" >&2
+    echo "Usage: settings-fzf.sh [preview <menu-item>]" >&2
     exit 1
     ;;
 esac

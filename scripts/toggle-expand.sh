@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# toggle-expand.sh — KEY_ZOOM 的 handler:展开/收起 lazygit 本体。
+# toggle-expand.sh — KEY_ZOOM handler: expand/collapse lazygit itself.
 #
-# LAYOUT_MODE 持久化在 panel.conf;每次切换后重生成 generated.yml 的 gui 段,
-# 调整当前 lazygit pane 的绝对宽度,最后注入 CSI focus-in 让 lazygit 立即
-# 热重载配置。脚本由 lazygit customCommand 调用,HERDR_PANE_ID 就是本 pane。
+# LAYOUT_MODE is persisted in panel.conf. Each toggle regenerates the GUI section
+# of generated.yml, adjusts the current lazygit pane's absolute width, and then
+# injects CSI focus-in so lazygit hot-reloads its configuration immediately.
+# The script is called by a lazygit customCommand, so HERDR_PANE_ID is this pane.
 #
-# bash 3.2 兼容(macOS 默认)。
+# bash 3.2 compatible (macOS default).
 set -euo pipefail
 
 [ "${HERDR_ENV:-}" = "1" ] || { echo "toggle-expand.sh: not inside herdr" >&2; exit 1; }
@@ -28,7 +29,7 @@ case "$EXPAND_COLS" in *[!0-9]*|'') EXPAND_COLS=110 ;; esac
 [ "$EXPAND_COLS" -ge 80 ] 2>/dev/null || EXPAND_COLS=80
 case "$LAYOUT_MODE" in sidebar|expanded) ;; *) LAYOUT_MODE=sidebar ;; esac
 
-# 保留 panel.conf 里的其他设置,只原子更新 LAYOUT_MODE。
+# Preserve other panel.conf settings and atomically update only LAYOUT_MODE.
 write_layout_mode() {
   local mode="$1" tmp
   mkdir -p "$config_dir"
@@ -36,7 +37,7 @@ write_layout_mode() {
   if [ -f "$panel_conf" ]; then
     grep -v '^LAYOUT_MODE=' "$panel_conf" > "$tmp" || true
   else
-    printf '%s\n' '# panel.conf — herdr-lazygit 面板几何与布局状态。' > "$tmp"
+    printf '%s\n' '# panel.conf — herdr-lazygit pane geometry and layout state.' > "$tmp"
   fi
   printf "LAYOUT_MODE='%s'\n" "$mode" >> "$tmp"
   mv "$tmp" "$panel_conf"
@@ -46,8 +47,9 @@ if [ "$LAYOUT_MODE" = "sidebar" ]; then
   next_mode="expanded"
   target_cols="$EXPAND_COLS"
 
-  # 展开后仍给 tab 的其他工作区保留至少 20 列。正常 tab(>=100 列)同时
-  # 保证 lazygit 不低于 80 列;更窄时两条约束不可同时满足,优先保留工作区。
+  # After expanding, leave at least 20 columns for the tab's other workspace.
+  # In a normal tab (>=100 columns), also keep lazygit at least 80 columns wide.
+  # When a narrower tab cannot satisfy both constraints, preserve the workspace.
   tab_width="$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
 import json, sys
 try:
@@ -69,5 +71,6 @@ write_layout_mode "$next_mode"
 HERDR_PLUGIN_CONFIG_DIR="$config_dir" bash "$script_dir/gen-config-layer.sh"
 python3 "$helper" set-width "$HERDR_PANE_ID" "$target_cols"
 
-# lazygit 在 focus-in 时 stat 并热重载全部配置;直接注入事件即可立即切布局。
+# lazygit stats and hot-reloads all configuration on focus-in; inject the event
+# directly to switch the layout immediately.
 herdr pane send-text "$HERDR_PANE_ID" $'\x1b[I' >/dev/null

@@ -1,50 +1,58 @@
 #!/usr/bin/env bash
-# ai-commit-msg.sh — AI 生成 conventional commit message(herdr-lazygit 插件)
+# ai-commit-msg.sh — AI-generated conventional commit messages for the
+# herdr-lazygit plugin.
 #
-# 子命令:
-#   candidates        读 staged diff,输出最多 3 个 commit message 候选(每行一个)
-#   backends          每行输出 "名字<TAB>状态"(detected/missing/current)
-#   set-backend NAME  写入配置文件(auto|claude|codex|opencode|gemini|custom)
+# Subcommands:
+#   candidates        Read the staged diff and output up to 3 commit-message
+#                     candidates, one per line.
+#   backends          Output "name<TAB>status" per line
+#                     (detected/missing/current).
+#   set-backend NAME  Write the backend to the configuration file
+#                     (auto|claude|codex|opencode|gemini|custom).
 #
-# 配置文件:$HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf(shell 可 source 格式)
+# Configuration file: $HERDR_PLUGIN_CONFIG_DIR/ai-backend.conf
+# (shell-sourceable format)
 #   AI_BACKEND=auto|claude|codex|opencode|gemini|custom
-#   AI_CUSTOM_CMD="..."   # custom 时:stdin 收 prompt+diff,stdout 出 message
+#   AI_CUSTOM_CMD="..."   # custom: stdin receives prompt+diff; stdout emits message
 #
-# bash 3.2 兼容(macOS 默认)。JSON/文本处理用 python3,不用 jq。
+# bash 3.2 compatible (macOS default). JSON/text processing uses python3,
+# without jq.
 
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# 常量与配置
+# Constants and configuration
 # ---------------------------------------------------------------------------
 
 TIMEOUT_SEC="${AI_TIMEOUT_SEC:-60}"
 DIFF_MAX_CHARS=8000
-BACKEND_ORDER="claude codex opencode gemini"   # auto 探测顺序
+BACKEND_ORDER="claude codex opencode gemini"   # auto detection order
 
-# 每个后端用的模型:commit message 是小活,默认刻意用便宜/快的档,
-# 避免继承用户 CLI 的默认模型(可能是最贵档 + 高推理强度)。
-# 在 ai-backend.conf 里覆盖;设为空字符串则回退到该 CLI 自己的默认。
+# Per-backend models: commit messages are a small task, so defaults deliberately
+# favor cheap, fast models instead of inheriting a user's CLI default (which may
+# be the most expensive tier with high reasoning effort). Override these in
+# ai-backend.conf; an empty string falls back to that CLI's own default.
 AI_CLAUDE_MODEL="${AI_CLAUDE_MODEL-haiku}"
-AI_CODEX_MODEL="${AI_CODEX_MODEL-}"   # 空 = codex 自己的默认(无公认稳定的便宜档 id,不猜)
+AI_CODEX_MODEL="${AI_CODEX_MODEL-}"   # empty = Codex default (no stable, broadly accepted cheap model ID; do not guess)
 AI_OPENCODE_MODEL="${AI_OPENCODE_MODEL-google/gemini-2.5-flash}"
 
 CONFIG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 CONFIG_FILE="$CONFIG_DIR/ai-backend.conf"
 
-MSG_NO_STAGED="(没有 staged 改动 — 先用空格 stage 文件)"
-MSG_NO_BACKEND="(未找到可用的 AI CLI:claude/codex/opencode/gemini)"
-MSG_NO_CUSTOM_CMD="(custom 后端未配置 AI_CUSTOM_CMD — 编辑 ai-backend.conf 或在设置页换后端)"
-MSG_TIMEOUT="(AI 生成超时,请重试或换后端)"
-MSG_FAILED="(AI 生成失败,请检查后端登录状态或换后端)"
+MSG_NO_STAGED="(nothing staged — stage files with Space first)"
+MSG_NO_BACKEND="(no available AI CLI found: claude/codex/opencode/gemini)"
+MSG_NO_CUSTOM_CMD="(custom backend has no AI_CUSTOM_CMD — edit ai-backend.conf or choose another backend in Settings)"
+MSG_TIMEOUT="(AI generation timed out; retry or choose another backend)"
+MSG_FAILED="(AI generation failed; check the backend login or choose another backend)"
 
 PROMPT='Generate up to 3 alternative conventional commit messages (feat/fix/docs/refactor/chore/test/perf/build/ci/style) for the following git diff. Output ONLY the commit messages, one per line, at most 3 lines. Each message must be a single line in English with a subject of at most 72 characters. No numbering, no bullets, no markdown, no quotes, no explanations.'
 
 # ---------------------------------------------------------------------------
-# 工具函数
+# Utility functions
 # ---------------------------------------------------------------------------
 
-# 环境变量里的 AI_BACKEND 优先于配置文件(便于临时切换/测试)
+# AI_BACKEND from the environment overrides the configuration file (useful for
+# temporary switching and tests).
 AI_BACKEND_ENV="${AI_BACKEND:-}"
 
 load_config() {
@@ -59,14 +67,16 @@ load_config() {
   fi
   AI_BACKEND="${AI_BACKEND:-auto}"
   AI_CUSTOM_CMD="${AI_CUSTOM_CMD:-}"
-  # 用户自定义 prompt(设置页编辑):存在且非空则覆盖内置 PROMPT
+  # A nonempty user prompt (edited through Settings) overrides the built-in one.
   if [ -s "$CONFIG_DIR/prompt.txt" ]; then
     PROMPT="$(cat "$CONFIG_DIR/prompt.txt")"
   fi
 }
 
-# 更新 conf 里的单个 KEY=VALUE,保留其他行(set-backend 早期实现会整写
-# conf 丢掉别的键,这里统一走这个助手)。值以单引号安全转义写入。
+# Update one KEY=VALUE in the conf file while preserving other lines. An early
+# set-backend implementation rewrote the whole conf and dropped other keys, so
+# all updates now go through this helper. Values are safely escaped and written
+# in single quotes.
 write_conf_var() {
   local key="$1" value="$2" tmp
   mkdir -p "$CONFIG_DIR"
@@ -80,9 +90,10 @@ write_conf_var() {
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
-# 带超时地运行命令:stdin 透传,stdout 透传;stderr 默认丢弃,
-# 若设置了 AI_ERR_FILE 则写入该文件(供失败时提取诊断提示)。
-# 超时 exit 124;其余透传子进程退出码。
+# Run a command with a timeout, passing stdin and stdout through. stderr is
+# discarded by default, or written to AI_ERR_FILE when set so a diagnostic can
+# be extracted after failure. A timeout exits 124; otherwise preserve the child
+# process's exit code.
 run_with_timeout() {
   python3 -c '
 import os, subprocess, sys
@@ -105,9 +116,10 @@ sys.exit(p.returncode)
 ' "$TIMEOUT_SEC" "$@"
 }
 
-# 从 stderr 文件里提取一行简短诊断(去 ANSI,优先含 Error/error 的行,截断)
+# Extract a short one-line diagnostic from a stderr file (strip ANSI, prefer a
+# line containing Error/error, and truncate it).
 stderr_hint() {
-  # $1 = stderr 文件路径
+  # $1 = stderr file path
   [ -s "${1:-}" ] || return 0
   python3 -c '
 import re, sys
@@ -115,7 +127,7 @@ try:
     data = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
 except OSError:
     sys.exit(0)
-data = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", data)   # 去 ANSI 转义
+data = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", data)   # strip ANSI escapes
 lines = [l.strip() for l in data.splitlines() if l.strip()]
 if not lines:
     sys.exit(0)
@@ -126,7 +138,8 @@ sys.stdout.write(pick)
 ' "$1"
 }
 
-# 净化模型输出:去 markdown 围栏/前后引号/空行/"commit message:" 前缀/编号,最多留 3 行
+# Sanitize model output: remove Markdown fences, surrounding quotes, blank
+# lines, "commit message:" prefixes, and numbering; keep at most 3 lines.
 sanitize_output() {
   python3 -c '
 import re, sys
@@ -135,10 +148,10 @@ for line in sys.stdin.read().splitlines():
     s = line.strip()
     if not s or s.startswith("```") or s.startswith("~~~"):
         continue
-    s = s.strip("`\"\x27 \t")       # 先去反引号/双引号/单引号(\x27 = 单引号)
+    s = s.strip("`\"\x27 \t")       # strip backticks/double/single quotes first (\x27 = single quote)
     s = re.sub(r"(?i)^(commit\s+messages?|messages?|candidates?)\s*[::]\s*", "", s)
-    s = re.sub(r"^\d+\s*[.)::]\s*", "", s)   # 1. / 2) 编号
-    s = re.sub(r"^[-*+]\s+", "", s)          # 列表符号
+    s = re.sub(r"^\d+\s*[.)::]\s*", "", s)   # numbering such as 1. / 2)
+    s = re.sub(r"^[-*+]\s+", "", s)          # list markers
     s = s.strip("`\"\x27 \t").strip()
     if not s:
         continue
@@ -150,12 +163,14 @@ sys.stdout.write("\n".join(out))
 }
 
 # ---------------------------------------------------------------------------
-# 各后端调用(diff 走 stdin,prompt 走 argv;实测结论见 Spike)
+# Backend invocations (diff through stdin, prompt through argv; see the Spike
+# for verified behavior).
 # ---------------------------------------------------------------------------
 
 gen_claude() {
-  # 注意:不能加 --bare(此版本会导致 keychain 凭据读取失败报 Not logged in)。
-  # 显式 --model(默认 haiku),避免继承用户 CLI 的贵档默认模型。
+  # Do not add --bare: this version then fails to read keychain credentials and
+  # reports Not logged in. Pass --model explicitly (haiku by default) to avoid
+  # inheriting an expensive CLI default.
   if [ -n "$AI_CLAUDE_MODEL" ]; then
     run_with_timeout claude -p --model "$AI_CLAUDE_MODEL" "$PROMPT"
   else
@@ -164,12 +179,14 @@ gen_claude() {
 }
 
 gen_opencode() {
-  # 默认模型不可用,必须显式 -m;stderr(横幅/ANSI)已被 run_with_timeout 丢弃
+  # The default model is unavailable, so -m is required explicitly. stderr
+  # (banner/ANSI) is discarded by run_with_timeout.
   run_with_timeout opencode run -m "${AI_OPENCODE_MODEL:-google/gemini-2.5-flash}" "$PROMPT"
 }
 
 gen_codex() {
-  # 最终 message 从 -o 文件读最可靠(stdout 不保证长期只有 message)
+  # Reading the final message from the -o file is most reliable; stdout is not
+  # guaranteed to contain only the message over time.
   local outfile rc model_args
   model_args=""
   [ -n "$AI_CODEX_MODEL" ] && model_args="-m $AI_CODEX_MODEL"
@@ -190,17 +207,17 @@ gen_gemini() {
 }
 
 gen_custom() {
-  # 契约:stdin 收 prompt+diff,stdout 出 message
+  # Contract: stdin receives prompt+diff; stdout emits the message.
   local diff_text
   diff_text="$(cat)"
   printf '%s\n\n%s' "$PROMPT" "$diff_text" | run_with_timeout sh -c "$AI_CUSTOM_CMD"
 }
 
 # ---------------------------------------------------------------------------
-# 后端解析
+# Backend resolution
 # ---------------------------------------------------------------------------
 
-# 输出解析出的后端名;解析失败输出空
+# Output the resolved backend name, or an empty string if resolution fails.
 resolve_backend() {
   local b
   case "$AI_BACKEND" in
@@ -229,7 +246,7 @@ resolve_backend() {
 }
 
 # ---------------------------------------------------------------------------
-# 子命令:candidates
+# Subcommand: candidates
 # ---------------------------------------------------------------------------
 
 cmd_candidates() {
@@ -244,16 +261,17 @@ cmd_candidates() {
 
   backend="$(resolve_backend)"
   if [ -z "$backend" ]; then
-    # 按配置区分原因,避免一律回答「未找到 AI CLI」误导用户
+    # Distinguish the reason from the configuration instead of always claiming
+    # no AI CLI was found.
     case "$AI_BACKEND" in
       custom) printf '%s\n' "$MSG_NO_CUSTOM_CMD" ;;
       auto)   printf '%s\n' "$MSG_NO_BACKEND" ;;
-      *)      printf '(当前后端 %s 未安装 — 在设置页换后端)\n' "$AI_BACKEND" ;;
+      *)      printf '(current backend %s is not installed — choose another backend in Settings)\n' "$AI_BACKEND" ;;
     esac
     return 0
   fi
 
-  # diff 截断
+  # Truncate the diff.
   diff="$(printf '%s' "$diff" | python3 -c '
 import sys
 limit = int(sys.argv[1])
@@ -275,12 +293,13 @@ sys.stdout.write(d)
     return 0
   fi
   if [ "$rc" -ne 0 ]; then
-    # 失败时带上后端名和一行 stderr 摘要(如 gemini 的 IneligibleTierError),
-    # 否则用户只看到笼统的失败提示,无从排查登录/资格问题
+    # Include the backend name and one stderr summary line on failure (such as
+    # Gemini's IneligibleTierError). A generic failure alone gives the user no
+    # way to diagnose login or eligibility problems.
     hint="$(stderr_hint "$err_file" || true)"
     rm -f "$err_file"
     if [ -n "$hint" ]; then
-      printf '(AI 生成失败[%s]: %s — 请检查后端登录状态或换后端)\n' "$backend" "$hint"
+      printf '(AI generation failed [%s]: %s — check the backend login or choose another backend)\n' "$backend" "$hint"
     else
       printf '%s\n' "$MSG_FAILED"
     fi
@@ -297,13 +316,13 @@ sys.stdout.write(d)
 }
 
 # ---------------------------------------------------------------------------
-# 子命令:backends
+# Subcommand: backends
 # ---------------------------------------------------------------------------
 
 cmd_backends() {
   load_config
   local b status
-  # auto 一行,便于在菜单里切回自动探测
+  # Include an auto row so the menu can switch back to automatic detection.
   if [ "$AI_BACKEND" = "auto" ]; then
     printf 'auto\tcurrent\n'
   else
@@ -329,7 +348,7 @@ cmd_backends() {
 }
 
 # ---------------------------------------------------------------------------
-# 子命令:set-backend NAME
+# Subcommand: set-backend NAME
 # ---------------------------------------------------------------------------
 
 cmd_set_backend() {
@@ -337,26 +356,27 @@ cmd_set_backend() {
   case "$name" in
     auto|claude|codex|opencode|gemini|custom) ;;
     *)
-      echo "用法: ai-commit-msg.sh set-backend auto|claude|codex|opencode|gemini|custom" >&2
+      echo "Usage: ai-commit-msg.sh set-backend auto|claude|codex|opencode|gemini|custom" >&2
       return 1
       ;;
   esac
 
   load_config
-  # custom 后端必须先配置 AI_CUSTOM_CMD,否则 candidates 会一路失败,
-  # 且错误提示会误导用户以为是没装 AI CLI
+  # A custom backend requires AI_CUSTOM_CMD first. Otherwise candidates always
+  # fails, and its error could misleadingly imply that no AI CLI is installed.
   if [ "$name" = "custom" ] && [ -z "$AI_CUSTOM_CMD" ]; then
-    echo "无法切换到 custom 后端:AI_CUSTOM_CMD 未配置。" >&2
-    echo "请先在 $CONFIG_FILE 中加入一行,例如:" >&2
-    echo "  AI_CUSTOM_CMD='my-ai-cli --flag'   # stdin 收 prompt+diff,stdout 出 message" >&2
-    echo "再执行 set-backend custom。" >&2
+    echo "Cannot switch to the custom backend: AI_CUSTOM_CMD is not configured." >&2
+    echo "First add a line to $CONFIG_FILE, for example:" >&2
+    echo "  AI_CUSTOM_CMD='my-ai-cli --flag'   # stdin receives prompt+diff; stdout emits message" >&2
+    echo "Then run set-backend custom again." >&2
     return 1
   fi
   write_conf_var AI_BACKEND "$name"
-  echo "AI 后端已设置为: $name"
+  echo "AI backend set to: $name"
 }
 
-# 当前(auto 时解析后的)后端名;custom/无可用后端时输出空
+# Current backend name (resolved when auto); output empty for custom or when no
+# backend is available.
 current_model_backend() {
   load_config
   local b="$AI_BACKEND"
@@ -378,18 +398,20 @@ model_var_for() {
   esac
 }
 
-# models — 输出当前后端的候选模型,一行一个(菜单数据源)。
-# 第一行是当前值;能动态取列表的后端(opencode)动态取,其余给常用档。
+# models — output model candidates for the current backend, one per line (menu
+# data source). The current value comes first. Fetch dynamic lists where
+# supported (opencode); otherwise provide commonly used tiers.
 cmd_models() {
   local backend cur
-  # 先在本作用域 load_config:current_model_backend 在命令替换(子 shell)里
-  # source 配置,其设置的 AI_<BACKEND>_MODEL 不会回传到这里。不显式加载,
-  # 下面读到的就永远是文件顶部的硬编码默认值(如 haiku),导致设置页模型
-  # 选择器把"当前模型"标错。
+  # Load the configuration in this scope first. current_model_backend sources
+  # it inside command substitution (a subshell), so its AI_<BACKEND>_MODEL
+  # values do not propagate here. Without this explicit load, the code below
+  # would always read the hard-coded defaults at the top of the file (such as
+  # haiku), making the Settings model picker mislabel the current model.
   load_config
   backend="$(current_model_backend)"
   if [ -z "$backend" ]; then
-    echo "(当前后端不支持选模型 — custom 后端请直接改 AI_CUSTOM_CMD)"
+    echo "(current backend does not support model selection — edit AI_CUSTOM_CMD directly for custom backends)"
     return 0
   fi
   cur="$(eval "printf '%s' \"\${$(model_var_for "$backend")-}\"")"
@@ -400,25 +422,28 @@ cmd_models() {
     opencode)
       opencode models 2>/dev/null || true ;;
     codex|gemini)
-      # 无公开的列表命令;给一个占位项,用户在下一步输入框里改成真实 id
-      echo "(在下一步输入框填模型 id;清空 = 跟随 CLI 默认)" ;;
+      # No public listing command; provide a placeholder that users replace
+      # with a real ID in the next input field.
+      echo "(enter a model ID in the next input; blank = use CLI default)" ;;
   esac | grep -v "^${cur}\$" || true
 }
 
-# set-model VALUE — 为当前后端写入模型(空值 = 跟随该 CLI 自己的默认)
+# set-model VALUE — write the model for the current backend (empty = use that
+# CLI's own default).
 cmd_set_model() {
   local value="${1:-}" backend
   backend="$(current_model_backend)"
   if [ -z "$backend" ]; then
-    echo "当前后端不支持设置模型" >&2
+    echo "The current backend does not support model selection" >&2
     return 1
   fi
-  case "$value" in "("*) echo "已取消" ; return 0 ;; esac
+  case "$value" in "("*) echo "Cancelled" ; return 0 ;; esac
   write_conf_var "$(model_var_for "$backend")" "$value"
-  echo "$backend 的模型已设置为: ${value:-（CLI 默认）}"
+  echo "$backend model set to: ${value:-(CLI default)}"
 }
 
-# prompt-file — 确保用户 prompt 文件存在(首次用内置 PROMPT 播种),输出路径
+# prompt-file — ensure the user prompt file exists (seeded from the built-in
+# PROMPT on first use), then output its path.
 cmd_prompt_file() {
   mkdir -p "$CONFIG_DIR"
   if [ ! -f "$CONFIG_DIR/prompt.txt" ]; then
@@ -428,7 +453,7 @@ cmd_prompt_file() {
 }
 
 # ---------------------------------------------------------------------------
-# 入口
+# Entry point
 # ---------------------------------------------------------------------------
 
 main() {
@@ -441,7 +466,7 @@ main() {
     set-model)   shift; cmd_set_model "$@" ;;
     prompt-file) cmd_prompt_file ;;
     *)
-      echo "用法: ai-commit-msg.sh candidates|backends|set-backend NAME|models|set-model VALUE|prompt-file" >&2
+      echo "Usage: ai-commit-msg.sh candidates|backends|set-backend NAME|models|set-model VALUE|prompt-file" >&2
       return 1
       ;;
   esac

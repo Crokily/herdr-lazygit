@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# open-settings-pane.sh — KEY_SETTINGS 的 handler:在 herdr 里打开插件设置页。
-# 由 lazygit 的 customCommand(生成层 generated.yml)从 lazygit pane 内触发,
-# 所以 HERDR_PANE_ID / HERDR_TAB_ID 指向侧栏 pane。
+# open-settings-pane.sh — KEY_SETTINGS handler: open plugin settings in herdr.
+# Triggered from inside the lazygit pane by its customCommand (from the
+# generated.yml layer), so HERDR_PANE_ID / HERDR_TAB_ID point to the sidebar.
 #
-# 行为(与 open-ai-commit-pane.sh 的几何模式同构):
-#   - 先关掉本 tab 里旧的 "GitSettings" pane(单实例)
-#   - 在侧栏右侧 split 出设置 pane,layout-helper.py place-diff 把
-#     (侧栏|设置) 区域摆成 SIDEBAR_COLS + SETTINGS_COLS 列
-#   - pane 内运行 settings-fzf.sh;退出(Esc/q)时 set-region-width 恢复
-#     打开前的 sidebar/expanded 宽度,再 exit 关掉 pane
+# Behavior (the same geometry pattern as open-ai-commit-pane.sh):
+#   - close any existing "GitSettings" pane in this tab (single instance)
+#   - split a Settings pane to the right of the sidebar; layout-helper.py
+#     place-diff arranges the (sidebar | settings) region as
+#     SIDEBAR_COLS + SETTINGS_COLS columns
+#   - run settings-fzf.sh in the pane; on exit (Esc/q), set-region-width restores
+#     the sidebar/expanded width from before opening, then exit closes the pane
 #
-# bash 3.2 兼容(macOS 默认)。
+# bash 3.2 compatible (macOS default).
 set -euo pipefail
 
 [ "${HERDR_ENV:-}" = "1" ] || { echo "open-settings-pane.sh: not inside herdr" >&2; exit 1; }
@@ -19,12 +20,13 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 helper="$script_dir/layout-helper.py"
 settings_sh="$script_dir/settings-fzf.sh"
 
-# 引号安全:bash 3.2 的 printf %q 会把多字节
-# UTF-8(如中文路径)拆成非法字节序列,herdr CLI(Rust)收到会 panic。
-# 统一用 python3 shlex.quote:单引号包裹、原始 UTF-8 原样保留。
+# Quoting safety: bash 3.2's printf %q breaks multibyte UTF-8 (such as paths
+# containing non-ASCII characters) into invalid byte sequences, causing the
+# herdr CLI (Rust) to panic. Use python3 shlex.quote consistently: wrap with
+# single quotes while preserving the original UTF-8 bytes.
 shq() { python3 -c 'import shlex, sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$1"; }
 
-# --- 几何参数:默认侧栏 42 列 / 设置页 70 列,panel.conf 可覆盖 -------------
+# --- Geometry: default sidebar 42 columns / Settings 70; panel.conf overrides -
 SIDEBAR_COLS=42
 EXPAND_COLS=110
 SETTINGS_COLS=70
@@ -40,7 +42,8 @@ case "$SETTINGS_COLS" in *[!0-9]*|'') SETTINGS_COLS=70 ;; esac
 [ "$EXPAND_COLS" -ge 80 ] 2>/dev/null || EXPAND_COLS=80
 [ "$SETTINGS_COLS" -ge 40 ] 2>/dev/null || SETTINGS_COLS=70
 
-# 设置 pane 显示期间 lazygit 暂时按侧栏宽度摆放;退出时恢复触发前模式。
+# Temporarily set lazygit to sidebar width while Settings is visible; restore the
+# mode active at invocation when it exits.
 restore_cols="$SIDEBAR_COLS"
 if [ "$LAYOUT_MODE" = "expanded" ]; then
   restore_cols="$EXPAND_COLS"
@@ -58,7 +61,7 @@ except Exception:
   fi
 fi
 
-# --- 单实例:关掉本 tab 里旧的 GitSettings pane ------------------------------
+# --- Single instance: close an existing GitSettings pane in this tab --------
 panes_json="$(herdr pane list 2>/dev/null || true)"
 printf '%s' "$panes_json" | python3 -c '
 import json, sys
@@ -72,7 +75,7 @@ for p in panes:
         print(p["pane_id"])
 ' "$HERDR_TAB_ID" | while read -r old; do herdr pane close "$old" >/dev/null 2>&1 || true; done
 
-# --- 打开设置 pane 并摆好几何 ------------------------------------------------
+# --- Open the Settings pane and apply its geometry --------------------------
 new_pane="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 [ -n "$new_pane" ] || { echo "open-settings-pane.sh: pane split failed" >&2; exit 1; }
@@ -80,14 +83,17 @@ new_pane="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0
 herdr pane rename "$new_pane" "GitSettings" >/dev/null 2>&1 || true
 python3 "$helper" place-diff "$HERDR_PANE_ID" "$new_pane" "$SIDEBAR_COLS" "$SETTINGS_COLS" 2>/dev/null || true
 
-# 退出前把 lazygit 宽度还原;settings-fzf.sh 报错(如缺 fzf)时 sleep 让提示可读;
-# 末尾 exit 让 q/Esc 退出后 pane 直接消失
+# Restore lazygit's width before exit. If settings-fzf.sh fails (for example,
+# fzf is missing), sleep so the message remains readable. The final exit makes
+# the pane disappear immediately after q/Esc.
 restore_cmd="python3 $(shq "$helper") set-region-width $(shq "$HERDR_PANE_ID") $(shq "$restore_cols")"
-# 显式把配置目录传进新 pane:pane run 起的是全新 shell,不继承 lazygit
-# (插件 pane)的 HERDR_PLUGIN_CONFIG_DIR——不传的话设置页会写到回退目录,
-# 而 lazygit 读的是插件配置目录,改动永远不生效。
+# Pass the configuration directory explicitly. pane run starts a fresh shell
+# that does not inherit HERDR_PLUGIN_CONFIG_DIR from lazygit (the plugin pane).
+# Without it, Settings writes to the fallback directory while lazygit reads the
+# plugin configuration directory, so changes never take effect.
 if ! herdr pane run "$new_pane" "clear; HERDR_PLUGIN_CONFIG_DIR=$(shq "$config_dir") bash $(shq "$settings_sh") || sleep 4; $restore_cmd >/dev/null 2>&1; exit" >/dev/null; then
-  # run 失败会留下一个空 shell pane:收掉并把侧栏还原,不给用户留残骸
+  # A failed run leaves an empty shell pane; close it and restore the sidebar so
+  # the user is not left with debris.
   herdr pane close "$new_pane" >/dev/null 2>&1 || true
   python3 "$helper" set-region-width "$HERDR_PANE_ID" "$restore_cols" >/dev/null 2>&1 || true
   echo "open-settings-pane.sh: pane run failed" >&2

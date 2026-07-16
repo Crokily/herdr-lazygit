@@ -1,17 +1,20 @@
-# herdr-lazygit 捆绑的 lazygit 配置(出厂层,三层配置的第一层)
+# Bundled lazygit configuration for herdr-lazygit (the first of three layers).
 #
-# 由 scripts/run-lazygit.sh 通过 LG_CONFIG_FILE 加载,顺序为:
-#   lazygit-config.yml(本文件,出厂)
-#     → $HERDR_PLUGIN_CONFIG_DIR/generated.yml(机器生成:插件键位与
-#        customCommands,由 scripts/gen-config-layer.sh 按 keys.conf 产出)
-#     → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml(用户手写,永远最后=永远赢)
+# Loaded through LG_CONFIG_FILE by scripts/run-lazygit.sh in this order:
+#   lazygit-config.yml (this bundled file)
+#     → $HERDR_PLUGIN_CONFIG_DIR/generated.yml (machine-generated plugin keys
+#        and customCommands, produced from keys.conf by gen-config-layer.sh)
+#     → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml (user-authored, always last
+#        and therefore always wins)
 #
-# 本文件刻意只保留 gui 段:
-# - 所有插件 customCommands(AI commit / 展开 / 设置)都在生成层,改键走设置页
-#   (lazygit 里按设置键)或 keys.conf;想覆盖其他 lazygit 配置写 lazygit-user.yml。
-# - 不做任何内置键位改动:v/V 归还 lazygit(v=范围选择,V=cherry-pick 粘贴),
-#   内置键重映射请写 lazygit-user.yml 的 keybinding 段。
-# - 不设置 gui.nerdFontsVersion(不假设用户装了 Nerd Font)。
+# This file deliberately contains only the gui section:
+# - All plugin customCommands (AI commit / expand / settings) live in the
+#   generated layer. Change their keys through Settings (press the Settings key
+#   in lazygit) or keys.conf; use lazygit-user.yml to override other settings.
+# - No built-in keybindings are changed: v/V belong to lazygit (v = range select,
+#   V = paste cherry-picked commits). Remap built-ins in the keybinding section
+#   of lazygit-user.yml.
+# - gui.nerdFontsVersion is unset (do not assume the user has a Nerd Font).
 
 gui:
   mouseEvents: true

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# open-ai-commit-pane.sh — KEY_COMMIT 的 handler:打开 AI commit 编辑 pane。
+# open-ai-commit-pane.sh — KEY_COMMIT handler: open the AI commit editing pane.
 #
-# 由 lazygit 的 files customCommand 触发。行为与设置 pane 同构:
-#   - 本 tab 的 GitCommit 单实例
-#   - 侧栏右边打开 COMMIT_COLS 宽 pane
-#   - 显式传递配置目录与仓库 cwd 给新 shell
-#   - UI 退出前恢复触发时的 sidebar/expanded 宽度,随后 exit 自动关 pane
+# Triggered by lazygit's files customCommand. Its behavior mirrors the Settings
+# pane:
+#   - one GitCommit instance per tab
+#   - open a COMMIT_COLS-wide pane to the right of the sidebar
+#   - explicitly pass the configuration directory and repository cwd to the
+#     new shell
+#   - restore the sidebar/expanded width from invocation before the UI exits;
+#     exit then closes the pane automatically
 #
-# bash 3.2 兼容(macOS 默认)。
+# bash 3.2 compatible (macOS default).
 set -euo pipefail
 
 [ "${HERDR_ENV:-}" = "1" ] || { echo "open-ai-commit-pane.sh: not inside herdr" >&2; exit 1; }
@@ -20,11 +23,11 @@ repo="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 
-# bash 3.2 的 printf %q 会破坏多字节 UTF-8;所有 pane run 命令片段统一
-# 由 python3 shlex.quote 生成。
+# bash 3.2's printf %q corrupts multibyte UTF-8; generate every pane-run command
+# fragment with python3 shlex.quote instead.
 shq() { python3 -c 'import shlex, sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$1"; }
 
-# --- 几何参数 ---------------------------------------------------------------
+# --- Geometry ---------------------------------------------------------------
 SIDEBAR_COLS=42
 EXPAND_COLS=110
 COMMIT_COLS=70
@@ -40,7 +43,8 @@ case "$COMMIT_COLS" in *[!0-9]*|'') COMMIT_COLS=70 ;; esac
 [ "$EXPAND_COLS" -ge 80 ] 2>/dev/null || EXPAND_COLS=80
 [ "$COMMIT_COLS" -ge 40 ] 2>/dev/null || COMMIT_COLS=70
 
-# AI pane 显示期间 lazygit 暂时按侧栏宽度摆放;关闭后恢复触发前模式。
+# Temporarily set lazygit to sidebar width while the AI pane is visible; restore
+# the mode active at invocation after it closes.
 restore_cols="$SIDEBAR_COLS"
 if [ "$LAYOUT_MODE" = "expanded" ]; then
   restore_cols="$EXPAND_COLS"
@@ -58,7 +62,7 @@ except Exception:
   fi
 fi
 
-# --- 单实例:关掉本 tab 里旧的 GitCommit pane ------------------------------
+# --- Single instance: close an existing GitCommit pane in this tab ----------
 panes_json="$(herdr pane list 2>/dev/null || true)"
 printf '%s' "$panes_json" | python3 -c '
 import json, sys
@@ -72,7 +76,7 @@ for p in panes:
         print(p["pane_id"])
 ' "$HERDR_TAB_ID" | while read -r old; do herdr pane close "$old" >/dev/null 2>&1 || true; done
 
-# --- 打开 AI commit pane 并摆好几何 ---------------------------------------
+# --- Open the AI commit pane and apply its geometry -------------------------
 new_pane="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 [ -n "$new_pane" ] || { echo "open-ai-commit-pane.sh: pane split failed" >&2; exit 1; }
