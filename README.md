@@ -4,18 +4,21 @@
 
 A [herdr](https://herdr.dev) plugin that runs [lazygit](https://github.com/jesseduffield/lazygit) in a narrow sidebar pane, with AI commit message generation. Press one key to open the sidebar, one key to expand it into the full lazygit layout, and one key to commit with an AI-written message.
 
+![herdr-lazygit demo](docs/media/demo.gif)
+
 ## Daily workflow
 
 Press `prefix+g`. A 42-column git sidebar opens next to your current directory. Press it again and the sidebar closes; the launcher never opens a second copy.
 
 A typical commit:
 
-1. **Review**: the sidebar lists changed files with M/A/D status colors. Press `U` to expand the sidebar into the full lazygit layout — diff view, history, stash, and every native interaction become available;
-2. **Stage**: `Space` (or double-click) stages a file. In the expanded layout, `Enter` opens the file and stages individual hunks;
-3. **Commit**: press `C`. A commit pane opens immediately, shows the backend and model, and runs a spinner while the AI reads the staged diff. It then lists 3 candidate messages. The bottom of the pane shows the full selected message, a change summary line, and the complete staged diff rendered by delta. Select a candidate, edit it in the input line, or type your own message, then press Enter to commit;
-4. **Sync**: `p` pull, `P` push, `f` fetch.
+1. **Stage**: the sidebar lists changed files with M/A/D status colors. `Space` (or double-click) stages a file — no expansion needed;
+2. **Commit**: press `C`. A commit pane opens immediately, shows the backend and model, and runs a spinner while the AI reads the staged diff. It then lists 3 candidate messages, with the full selected message, a change summary, and the complete staged diff rendered below. Select a candidate, edit it in the input line, or type your own message, then press Enter to commit;
+3. **Sync**: `p` pull, `P` push, `f` fetch.
 
-Press `U` again to return to the compact sidebar.
+For everyday commits, the sidebar is all you need. When you want a deeper look — full diff view, history, stash, hunk-by-hunk staging with `Enter` — press `U` to expand into the complete lazygit layout, and `U` again to collapse back.
+
+![Expand and collapse with U](docs/media/expand.gif)
 
 ## The three plugin keys
 
@@ -41,9 +44,13 @@ Press `;` from anywhere in lazygit. A settings pane (fzf-driven, keyboard and mo
 
 Changes take effect when the lazygit pane regains focus — lazygit hot-reloads its config files on focus, so no restart is needed.
 
+![The settings pane](docs/media/settings.png)
+
 ## What AI commit requires
 
 One of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemini`. No API keys are needed; the plugin calls the CLI's non-interactive mode under your existing login. When generation fails, the commit pane shows a hint line starting with `(` that names the backend and the error; press any key to close. `Ctrl-C` cancels a running generation.
+
+![The AI commit pane](docs/media/commit-pane.png)
 
 ## Install
 

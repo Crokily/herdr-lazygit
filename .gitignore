@@ -1,1 +1,3 @@
 scripts/__pycache__/
+demo/out*/
+.DS_Store

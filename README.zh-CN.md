@@ -4,18 +4,21 @@
 
 一个 [herdr](https://herdr.dev) 插件:在窄侧栏 pane 里运行 [lazygit](https://github.com/jesseduffield/lazygit),内置 AI 生成 commit message。一个键打开侧栏,一个键展开成完整 lazygit 布局,一个键用 AI 写好的 message 提交。
 
+![herdr-lazygit 演示](docs/media/demo.gif)
+
 ## 日常工作流
 
 按 `prefix+g`,当前目录旁边打开一条 42 列的 git 侧栏;再按一次关闭。启动器是幂等的,不会开出第二个。
 
 一次典型的提交:
 
-1. **看改动**:侧栏列出所有改动文件,带 M/A/D 状态色。按 `U` 把侧栏展开成完整 lazygit 布局——diff 视图、历史、stash 和全部原生交互都可用;
-2. **暂存**:`空格`(或双击)stage 文件;展开状态下按 `Enter` 进入文件,逐块 stage;
-3. **提交**:按 `C`,commit pane 立即打开,显示后端与模型,AI 读取 staged diff 期间显示进度动画,然后列出 3 条候选 message。pane 下方同时显示选中候选的完整内容、一行改动统计、以及 delta 渲染的完整 staged diff。选一条候选、在输入行编辑它、或直接输入自己的 message,回车提交;
-4. **同步**:`p` pull、`P` push、`f` fetch。
+1. **暂存**:侧栏列出所有改动文件,带 M/A/D 状态色。`空格`(或双击)stage 文件——不需要展开;
+2. **提交**:按 `C`,commit pane 立即打开,显示后端与模型,AI 读取 staged diff 期间显示进度动画,然后列出 3 条候选 message,下方同时展示选中候选的完整内容、一行改动统计、以及 delta 渲染的完整 staged diff。选一条候选、在输入行编辑它、或直接输入自己的 message,回车提交;
+3. **同步**:`p` pull、`P` push、`f` fetch。
 
-再按一次 `U` 回到窄侧栏。
+日常提交,窄侧栏就够了。想深入查看时——完整 diff 视图、历史、stash、按 `Enter` 逐块 stage——按 `U` 展开成完整 lazygit 布局,再按 `U` 收回。
+
+![U 展开与收起](docs/media/expand.gif)
 
 ## 插件的三个键
 
@@ -41,9 +44,13 @@
 
 改动在 lazygit pane 重新获得焦点时生效——lazygit 在 focus 时热重载配置文件,无需重启。
 
+![设置页](docs/media/settings.png)
+
 ## AI 提交的前置条件
 
 安装并登录以下任意一个 CLI:`claude`、`codex`、`opencode`、`gemini`。不需要配置 API key,插件调用 CLI 的非交互模式,使用你已有的登录态。生成失败时 commit pane 显示以 `(` 开头的提示行,包含后端名和错误摘要,按任意键关闭;生成过程中 `Ctrl-C` 取消。
+
+![AI commit pane](docs/media/commit-pane.png)
 
 ## 安装
 
