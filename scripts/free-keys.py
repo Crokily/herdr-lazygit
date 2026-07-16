@@ -47,6 +47,9 @@ import re
 import subprocess
 import sys
 
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+PRIVATE_LAZYGIT = os.path.join(PLUGIN_ROOT, "bin", "lazygit")
+
 # customCommands context name -> keybinding section name.
 # subCommits / reflogCommits share keybinding.commits with commits; several
 # branch-sidebar contexts share keybinding.branches.
@@ -108,7 +111,7 @@ def load_bindings():
     flow lists [a, b], and block lists with `- item`.
     """
     try:
-        lazygit = os.environ.get("HERDR_LAZYGIT_BIN", "lazygit")
+        lazygit = os.environ.get("HERDR_LAZYGIT_BIN") or PRIVATE_LAZYGIT
         out = subprocess.run(
             [lazygit, "--config"],
             capture_output=True, text=True, check=True,

@@ -5,12 +5,15 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/herdr-lazygit-integration-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
+python_bin="$(command -v python3)"
 
 # ---------------------------------------------------------------------------
 # Fresh pane commands must preserve HERDR_BIN_PATH for their cleanup helpers.
 # ---------------------------------------------------------------------------
-fake_herdr="$tmp/custom-herdr"
+fake_herdr_dir="$tmp/custom tools"
+fake_herdr="$fake_herdr_dir/custom-herdr"
 command_log="$tmp/pane-run.log"
+mkdir -p "$fake_herdr_dir"
 cat > "$fake_herdr" <<'EOF'
 #!/bin/sh
 set -eu
@@ -37,6 +40,7 @@ esac
 EOF
 chmod +x "$fake_herdr"
 : > "$command_log"
+quoted_fake_herdr="$("$python_bin" -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$fake_herdr")"
 
 common_env=(
   HERDR_ENV=1
@@ -54,13 +58,34 @@ env "${common_env[@]}" bash "$repo_root/scripts/open-ai-commit-pane.sh"
 [ "$(wc -l < "$command_log" | tr -d ' ')" = 2 ]
 while IFS= read -r pane_command; do
   case "$pane_command" in
-    *"export HERDR_BIN_PATH=$fake_herdr "*) ;;
+    *"export HERDR_BIN_PATH=$quoted_fake_herdr "*) ;;
     *)
       printf 'pane command did not export HERDR_BIN_PATH: %s\n' "$pane_command" >&2
       exit 1
       ;;
   esac
 done < "$command_log"
+
+# ---------------------------------------------------------------------------
+# Direct free-key analysis must resolve the plugin-private lazygit without a
+# same-named binary on PATH or runtime-env.sh preloading its absolute path.
+# ---------------------------------------------------------------------------
+standalone_root="$tmp/standalone plugin"
+empty_path="$tmp/empty-path"
+mkdir -p "$standalone_root/scripts" "$standalone_root/bin" "$empty_path"
+cp "$repo_root/scripts/free-keys.py" "$standalone_root/scripts/"
+cat > "$standalone_root/bin/lazygit" <<'EOF'
+#!/bin/sh
+printf '%s\n' \
+  'keybinding:' \
+  '    universal:' \
+  '        quit: q'
+EOF
+chmod +x "$standalone_root/bin/lazygit"
+(
+  unset HERDR_LAZYGIT_BIN HERDR_LAZYGIT_ROOT HERDR_PLUGIN_ROOT
+  PATH="$empty_path" "$python_bin" "$standalone_root/scripts/free-keys.py" check U global
+)
 
 # ---------------------------------------------------------------------------
 # Rebuilding the pinned lazygit binary must invalidate generated.yml even when

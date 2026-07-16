@@ -19,7 +19,7 @@ plugin_root=$(CDPATH= cd "$script_dir/.." && pwd)
 # shellcheck disable=SC1091
 . "$script_dir/runtime-versions.sh"
 
-bin_dir="${HERDR_LAZYGIT_RUNTIME_BIN_DIR:-$plugin_root/bin}"
+bin_dir="$plugin_root/bin"
 lazygit_base_url="${HERDR_LAZYGIT_LAZYGIT_BASE_URL:-https://github.com/jesseduffield/lazygit/releases/download}"
 fzf_base_url="${HERDR_LAZYGIT_FZF_BASE_URL:-https://github.com/junegunn/fzf/releases/download}"
 
@@ -41,8 +41,8 @@ if ! have sha256sum && ! have shasum; then
   fatal "sha256sum or shasum is required to verify runtime downloads"
 fi
 
-os_raw="${HERDR_LAZYGIT_TEST_OS:-$(uname -s 2>/dev/null || printf unknown)}"
-arch_raw="${HERDR_LAZYGIT_TEST_ARCH:-$(uname -m 2>/dev/null || printf unknown)}"
+os_raw=$(uname -s 2>/dev/null || printf unknown)
+arch_raw=$(uname -m 2>/dev/null || printf unknown)
 case "$os_raw" in
   Darwin) os=darwin ;;
   Linux)  os=linux ;;
@@ -100,9 +100,74 @@ sha256_of() {
 
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/herdr-lazygit-runtime.XXXXXX") \
   || fatal "could not create a temporary directory"
-trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
-stage="$tmpdir/bin"
-mkdir -p "$stage"
+stage=""
+backup=""
+publish_complete=0
+had_lazygit=0
+had_fzf=0
+published_lazygit=0
+published_fzf=0
+cleanup() {
+  status=$?
+  rollback_failed=0
+  trap - EXIT HUP INT TERM
+
+  if [ "$publish_complete" -ne 1 ] && [ -n "$backup" ]; then
+    if [ "$published_lazygit" -eq 1 ]; then
+      if ! rm -f "$bin_dir/lazygit"; then
+        printf 'herdr-lazygit: failed to remove the partial lazygit update\n' >&2
+        rollback_failed=1
+      fi
+    fi
+    if [ "$published_fzf" -eq 1 ]; then
+      if ! rm -f "$bin_dir/fzf"; then
+        printf 'herdr-lazygit: failed to remove the partial fzf update\n' >&2
+        rollback_failed=1
+      fi
+    fi
+    if [ "$had_lazygit" -eq 1 ] && [ -f "$backup/lazygit" ]; then
+      if ! mv -f "$backup/lazygit" "$bin_dir/lazygit"; then
+        printf 'herdr-lazygit: failed to restore the previous lazygit binary\n' >&2
+        rollback_failed=1
+      fi
+    fi
+    if [ "$had_fzf" -eq 1 ] && [ -f "$backup/fzf" ]; then
+      if ! mv -f "$backup/fzf" "$bin_dir/fzf"; then
+        printf 'herdr-lazygit: failed to restore the previous fzf binary\n' >&2
+        rollback_failed=1
+      fi
+    fi
+  fi
+
+  [ -z "$stage" ] || rm -rf "$stage" || :
+  if [ -n "$backup" ]; then
+    if [ "$publish_complete" -eq 1 ] || [ "$rollback_failed" -eq 0 ]; then
+      rm -rf "$backup" || :
+    else
+      printf 'herdr-lazygit: rollback incomplete; recovery binaries retained in %s\n' \
+        "$backup" >&2
+    fi
+  fi
+  rm -rf "$tmpdir" || :
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+# Keep executable staging on the destination filesystem. Hardened Linux hosts
+# commonly mount /tmp with noexec; downloads and extraction can stay there, but
+# smoke-testing the runtime must happen where the installed binaries will run.
+mkdir -p "$bin_dir" || fatal "could not create runtime directory: $bin_dir"
+for destination in "$bin_dir/lazygit" "$bin_dir/fzf"; do
+  if [ -L "$destination" ]; then
+    fatal "runtime destination is not a regular file: $destination"
+  elif [ -e "$destination" ]; then
+    [ -f "$destination" ] \
+      || fatal "runtime destination is not a regular file: $destination"
+  fi
+done
+stage=$(mktemp -d "$bin_dir/.runtime-stage.XXXXXX") \
+  || fatal "could not create runtime staging under $bin_dir"
 
 install_archive() {
   tool=$1
@@ -147,14 +212,30 @@ install_archive \
 "$stage/fzf" --version >/dev/null 2>&1 \
   || fatal "the downloaded fzf binary cannot run on $os_raw/$arch_raw"
 
-# Replace both tools only after both downloads have verified and extracted.
-mkdir -p "$bin_dir"
-for tool in lazygit fzf; do
-  pending="$bin_dir/.$tool.$$"
-  cp "$stage/$tool" "$pending"
-  chmod 0755 "$pending"
-  mv -f "$pending" "$bin_dir/$tool"
-done
+# Replace both tools only after both downloads have verified, extracted, and
+# executed successfully from the destination filesystem. Preserve the prior
+# pair until publication completes so a failed second rename can roll back the
+# first instead of leaving a mixed runtime.
+backup=$(mktemp -d "$bin_dir/.runtime-backup.XXXXXX") \
+  || fatal "could not create runtime rollback directory under $bin_dir"
+if [ -f "$bin_dir/lazygit" ]; then
+  had_lazygit=1
+  mv "$bin_dir/lazygit" "$backup/lazygit"
+fi
+if [ -f "$bin_dir/fzf" ]; then
+  had_fzf=1
+  mv "$bin_dir/fzf" "$backup/fzf"
+fi
+
+published_lazygit=1
+mv "$stage/lazygit" "$bin_dir/lazygit"
+published_fzf=1
+mv "$stage/fzf" "$bin_dir/fzf"
+[ -f "$bin_dir/lazygit" ] && [ -x "$bin_dir/lazygit" ] \
+  || fatal "failed to publish the lazygit runtime binary"
+[ -f "$bin_dir/fzf" ] && [ -x "$bin_dir/fzf" ] \
+  || fatal "failed to publish the fzf runtime binary"
+publish_complete=1
 
 printf 'herdr-lazygit: installed private runtime in %s\n' "$bin_dir"
 printf '  lazygit %s (%s/%s)\n' "$LAZYGIT_VERSION" "$os" "$lazygit_arch"

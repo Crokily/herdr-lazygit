@@ -1,0 +1,44 @@
+name: Runtime tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Test runtime installer
+        run: bash tests/install-runtime-test.sh
+
+      - name: Test runtime integration
+        run: bash tests/runtime-integration-test.sh
+
+      - name: Check script syntax
+        shell: bash
+        run: |
+          for file in scripts/*.sh tests/*.sh; do
+            bash -n "$file"
+          done
+          for file in scripts/install-runtime.sh scripts/runtime-versions.sh; do
+            /bin/sh -n "$file"
+          done
+          python3 -m compileall -q scripts
