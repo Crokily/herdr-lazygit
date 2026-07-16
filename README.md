@@ -6,6 +6,8 @@ A [herdr](https://herdr.dev) plugin that runs [lazygit](https://github.com/jesse
 
 ![herdr-lazygit demo](docs/media/demo.gif)
 
+<sub>Demo recorded automatically by Fable 5 with the [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill.</sub>
+
 ## Daily workflow
 
 Press `prefix+g`. A 42-column git sidebar opens next to your current directory. Press it again and the sidebar closes; the launcher never opens a second copy.

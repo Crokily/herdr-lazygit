@@ -6,6 +6,8 @@
 
 ![herdr-lazygit 演示](docs/media/demo.gif)
 
+<sub>演示 GIF 由 Fable 5 使用 [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill 自动录制。</sub>
+
 ## 日常工作流
 
 按 `prefix+g`,当前目录旁边打开一条 42 列的 git 侧栏;再按一次关闭。启动器是幂等的,不会开出第二个。
