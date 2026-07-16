@@ -7,7 +7,7 @@
 #     → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml(用户手写,永远最后=永远赢)
 #
 # 本文件刻意只保留 gui 段:
-# - 所有插件 customCommands(AI commit / 放大 / 设置)都在生成层,改键走设置页
+# - 所有插件 customCommands(AI commit / 展开 / 设置)都在生成层,改键走设置页
 #   (lazygit 里按设置键)或 keys.conf;想覆盖其他 lazygit 配置写 lazygit-user.yml。
 # - 不做任何内置键位改动:v/V 归还 lazygit(v=范围选择,V=cherry-pick 粘贴),
 #   内置键重映射请写 lazygit-user.yml 的 keybinding 段。

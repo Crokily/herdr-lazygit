@@ -2,18 +2,18 @@
 
 [中文文档](README.zh-CN.md)
 
-**One keypress summons a git sidebar right next to your work.** It puts [lazygit](https://github.com/jesseduffield/lazygit) inside [herdr](https://herdr.dev)'s window system: a minimal 42-column single-column panel by default, wide panes popping up beside it when something needs more room, and an AI writing your commit messages.
+**One keypress summons a git sidebar right next to your work.** It puts [lazygit](https://github.com/jesseduffield/lazygit) inside [herdr](https://herdr.dev)'s window system: a minimal 42-column single-column panel by default, one key to expand the full lazygit UI, and an AI commit pane that appears before generation starts.
 
 ## What it feels like
 
 Press `prefix+g` and a narrow git sidebar slides open next to your current directory (press again to tuck it away — it never stacks duplicates). A typical commit goes like this:
 
-1. **Review**: changed files are listed with M/A/D status colors. To inspect one, select it and press `U` — a wide pane opens beside the sidebar with the full diff (rendered by delta). Press `q`, the pane vanishes, the layout snaps back;
-2. **Pick**: `Space` (or double-click) stages a file; `Enter` lets you stage hunk by hunk;
-3. **Commit**: press `C`. The AI reads what you staged and pops 3 conventional-commit candidates a few seconds later — hit Enter to commit. Not happy? `z` undoes it, try again;
+1. **Expand and review**: changed files are listed with M/A/D status colors. Press `U` first: the sidebar expands into the full lazygit layout, with its native diff, history, stash, and command views available;
+2. **Pick**: `Space` (or double-click) stages a file. With lazygit expanded, `Enter` opens the selected file so you can stage hunk by hunk using the native interface;
+3. **Commit**: press `C`. A commit pane appears immediately with the backend/model and a spinner while AI reads the staged diff. Then select a candidate, edit it in the input, or type your own message and press Enter;
 4. **Sync**: `p` pull, `P` push, `f` fetch. One key per verb.
 
-Browsing history uses the same verb: select any commit and press `U` for the full `git show`, or a stash entry for its patch. **`U` means "zoom" — whatever doesn't fit in the single column pops out beside it.**
+Press `U` again whenever you want the compact sidebar back. **`U` means "expand/collapse lazygit itself"** — once expanded, every stock lazygit interaction works normally instead of being replaced by plugin-specific viewers.
 
 ### Three keys are the whole surface
 
@@ -21,8 +21,8 @@ The plugin adds exactly three keys — one verb each; everything else is stock l
 
 | Key | Verb | What it does |
 | --- | --- | --- |
-| `C` | **Commit** | AI reads the staged diff → 3 candidates → Enter commits |
-| `U` | **Zoom** | File diff / commit details / stash patch in a wide pane; `q` closes |
+| `C` | **Commit** | Opens a pane immediately → AI generates → select/edit/write → commit |
+| `U` | **Expand** | Toggles lazygit between the compact sidebar and full layout |
 | `;` | **Settings** | Opens the settings pane — every knob below lives there |
 
 All three keys are remappable (see below), and the mouse works throughout: click to select, double-click to stage, wheel to scroll.
@@ -35,17 +35,17 @@ Press `;` from anywhere in lazygit and a settings pane (fzf-driven, keyboard and
 - **AI model**: per backend — defaults deliberately pick the cheap/fast tier (haiku for claude) so your CLI's expensive default model is never burned on commit messages;
 - **AI prompt**: opens in `$EDITOR` — want Chinese messages, emoji, a different format? Edit here;
 - **Keys**: remap C / U / ; live — press the new key; collisions with lazygit built-ins are rejected with the owner shown;
-- **Widths**: sidebar and zoom pane columns.
+- **Widths**: sidebar, expanded lazygit, and AI commit pane columns.
 
 Changes apply **the moment you focus lazygit again** — it hot-reloads its config on focus, no restart.
 
 ### What AI commit needs
 
-Any one of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemini`. No API keys — it rides your CLI's own login. On failure the menu shows a hint line (starting with `(`) naming the cause; selecting it never commits, so dismissing with Enter is safe.
+Any one of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemini`. No API keys — it rides your CLI's own login. Generation errors appear inside the commit pane as a readable hint (starting with `(`); press any key to close it. While generation is running, `Ctrl-C` cancels the backend process.
 
 ## Install
 
-Requires herdr >= 0.7.0. `lazygit` and `fzf` (used by the settings pane) are detected at install time and installed via Homebrew if missing.
+Requires herdr >= 0.7.0. `lazygit` and `fzf` (used by the settings and AI commit panes) are detected at install time and installed via Homebrew if missing.
 
 ```sh
 # Install from GitHub (herdr accepts the <owner>/<repo>[/subdir] short form, optional --ref)
@@ -77,8 +77,8 @@ Run `herdr server reload-config` and you're set. `prefix+g` behaves as: not open
 
 ### Key details
 
-- `C` only reads **staged** content — stage first, then press. It overrides the files panel's low-traffic built-in "commit using git editor" (rebind that in `lazygit-user.yml` if you miss it).
-- `U`'s three contexts: files panel = the selected file's diff (staged + unstaged; untracked files diffed against `/dev/null`); commits / sub-commits / reflog panels = `git show`; stash panel = the entry's patch. Only one zoom pane exists at a time — pressing again replaces it.
+- `C` only reads **staged** content — stage first, then press. It overrides the files panel's low-traffic built-in "commit using git editor" (rebind that in `lazygit-user.yml` if you miss it). Only one `GitCommit` pane exists per tab.
+- `U` is global and toggles `LAYOUT_MODE` between `sidebar` and `expanded`. Expanded width defaults to 110 columns, clamps to the tab width minus 20 columns, and falls back to the configured 42-column sidebar when collapsed. Reopening the plugin always starts in sidebar mode.
 - `U` and `;` are the defaults produced by a **free-key analysis** of every lazygit 0.63.0 built-in binding: candidate `Z` is taken by `universal.redo`, `Ctrl+S` / `O` collide with the filtering and PR menus, while `U` and `;` are unbound in every panel (full occupancy matrix in [DESIGN.md](DESIGN.md) Appendix A). The key-picking rule: **plugin keys must not shadow commonly-used lazygit built-ins** — which is why `v` (range select) and `V` (cherry-pick paste) stay stock.
 - Keys persist in `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`.
 
@@ -101,10 +101,10 @@ AI_CUSTOM_CMD=""
 The plugin loads three lazygit config layers via `LG_CONFIG_FILE` (later layers win):
 
 1. The bundled base layer `lazygit-config.yml` (factory settings — do not edit, plugin updates overwrite it)
-2. The generated layer `$HERDR_PLUGIN_CONFIG_DIR/generated.yml` (written by the settings pane / generator — machine-generated, do not edit)
+2. The generated layer `$HERDR_PLUGIN_CONFIG_DIR/generated.yml` (written from keys plus layout mode — machine-generated, do not edit)
 3. Your override layer `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml` (created on first run; always last = always wins)
 
-Scalar settings are overridden field by field; `customCommands` entries accumulate across layers, with the later file winning on the same key + context — so your override layer can replace any plugin command outright. The base layer stays minimal (mouse support on, random tips off) and doesn't assume a Nerd Font (set `gui.nerdFontsVersion: "3"` in your override layer if you have one).
+Scalar settings are overridden field by field; `customCommands` entries accumulate across layers, with the later file winning on the same key + context — so your override layer can replace any plugin command outright. The generated layer owns the mode-dependent `sidePanelWidth` plus fixed `expandFocusedSidePanel: true` / `portraitMode: never`; the base layer keeps mouse support on and random tips off. Neither assumes a Nerd Font (set `gui.nerdFontsVersion: "3"` in your override layer if you have one).
 
 To remap a **plugin** key, use the settings pane (stored in `keys.conf`). To remap a **lazygit built-in**, add a `keybinding` section to `lazygit-user.yml`.
 
@@ -116,12 +116,14 @@ lazygit-config.yml           # bundled base config (factory layer)
 DESIGN.md                    # design doc: three-verb model, key rules, config layers
 scripts/
   ensure-lazygit.sh          # install-time: detect/install lazygit
-  ensure-fzf.sh              # install-time: detect/install fzf (settings pane)
+  ensure-fzf.sh              # install-time: detect/install fzf (settings + commit UI)
   run-lazygit.sh             # pane entrypoint: regenerate config layer, exec lazygit
   open-lazygit.sh            # action: open in a split (idempotent open/focus/toggle)
   open-lazygit-tab.sh        # action: open in a tab
   ai-commit-msg.sh           # AI commit message generation / backend & model management
-  show-diff-pane.sh          # Zoom handler: wide pane for file / commit / stash
+  open-ai-commit-pane.sh     # Commit handler: opens/restores the GitCommit pane
+  ai-commit-pane.sh          # spinner + fzf message editing + git commit UI
+  toggle-expand.sh           # Expand handler: mode, geometry, and focus-in reload
   open-settings-pane.sh      # Settings handler: opens the settings pane
   settings-fzf.sh            # the fzf menu loop inside the settings pane
   gen-config-layer.sh        # keys.conf -> generated.yml (machine-generated layer)
@@ -133,7 +135,7 @@ Per-user state lives in `$HERDR_PLUGIN_CONFIG_DIR` (falls back to `~/.config/her
 
 ```
 keys.conf                    # plugin keys: KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS
-panel.conf                   # widths: SIDEBAR_COLS / DIFF_COLS / SETTINGS_COLS
+panel.conf                   # widths + LAYOUT_MODE(sidebar/expanded)
 ai-backend.conf              # AI backend / per-backend model
 prompt.txt                   # custom AI commit prompt
 generated.yml                # machine-generated lazygit layer — do not edit

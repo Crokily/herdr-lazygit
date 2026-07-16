@@ -7,20 +7,19 @@
 #       → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml(用户手写,永远最后=永远赢)
 #
 # 输入:$HERDR_PLUGIN_CONFIG_DIR/keys.conf(设置页写入,shell 可 source),
-# 仅承载插件三个动词的键位;缺失/缺项 = 用默认值:
+# 以及 panel.conf 的 LAYOUT_MODE(sidebar|expanded);缺失/缺项 = 用默认值:
 #   KEY_COMMIT=C   KEY_ZOOM=U   KEY_SETTINGS=';'
 # (U 与 ';' 来自 scripts/free-keys.py 对 lazygit 0.63.0 内置键的空闲键分析:
 #  Z 被 universal.redo 占用,<c-s> 被 universal.filteringMenu 占用,
 #  O 被 branches.viewPullRequestOptions 占用;U/';' 全面板零占用。)
 #
 # 输出:generated.yml,包含
-#   - customCommands:KEY_COMMIT(AI commit 全流程)、KEY_ZOOM ×3(files /
-#     commits+subCommits+reflogCommits / stash,调 show-diff-pane.sh)、
-#     KEY_SETTINGS(global,调 open-settings-pane.sh)
-#   - keybinding:仅当 KEY_SETTINGS 与某"面板级"内置键冲突时按需 <disabled>
-#     (global 自定义命令会被面板内置键遮蔽——S 在 files 弹 stash 菜单实测踩雷;
-#      KEY_ZOOM 是面板级自定义命令,天然压过同面板/universal 内置键,无需 disable;
-#      正常情况下设置页已用 free-keys.py check 拒绝冲突键,此段应为空)
+#   - gui:按 LAYOUT_MODE 生成 sidebar/expanded 两种 lazygit 布局
+#   - customCommands:KEY_COMMIT(打开 AI commit pane)、KEY_ZOOM(global,
+#     切换布局)、KEY_SETTINGS(global,调 open-settings-pane.sh)
+#   - keybinding:保留 KEY_SETTINGS 手写旧配置的按需 <disabled> 兼容逻辑。
+#     KEY_ZOOM / KEY_SETTINGS 现在都是 global;设置页会用 free-keys.py check
+#     拒绝任何面板冲突,默认 U / ';' 全面板空闲,正常不会生成本段。
 #
 # 幂等 + 毫秒级:generated.yml 比 keys.conf / 本脚本 / free-keys.py 都新时直接
 # 跳过;写文件走 tmp+mv,避免 lazygit 热重载读到半截文件。
@@ -33,6 +32,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 mkdir -p "$config_dir"
 keys_conf="$config_dir/keys.conf"
+panel_conf="$config_dir/panel.conf"
 out="$config_dir/generated.yml"
 
 # 插件三动词的默认键(设置页 settings-fzf.sh 的 DEF_KEY_* 必须与此保持一致)
@@ -53,6 +53,19 @@ fi
 [ -n "$k_commit" ]   || k_commit="$def_commit"
 [ -n "$k_zoom" ]     || k_zoom="$def_zoom"
 [ -n "$k_settings" ] || k_settings="$def_settings"
+
+# --- 读 panel.conf 的布局状态(非法值退回 sidebar) -------------------------
+layout_mode=""
+if [ -f "$panel_conf" ]; then
+  layout_mode="$(
+    ( . "$panel_conf" >/dev/null 2>&1 || exit 0
+      printf '%s' "${LAYOUT_MODE:-}" ) 2>/dev/null
+  )"
+fi
+case "$layout_mode" in
+  sidebar|expanded) ;;
+  *) layout_mode="sidebar" ;;
+esac
 
 # --- 键位合法性校验:非法值退回默认并告警,绝不写进 generated.yml -----------
 # lazygit 合法键 = 单字符,或 <...> 命名键(如 <c-s> <enter> <tab>)。
@@ -79,7 +92,7 @@ valid_key "$k_settings" || { warn_bad_key KEY_SETTINGS "$k_settings" "$def_setti
 # (relaunch 时的 gen 也一并跳过)。直接比对头部 "# keys: ..." marker,与写入
 # 时刻无关,彻底规避该问题;keys.conf 删除想恢复默认的场景也一并覆盖
 # (此时 marker = 默认键行)。self / free-keys.py 变更仍用 -nt 兜底触发重生。
-marker="# keys: $k_commit $k_zoom $k_settings"
+marker="# keys: $k_commit $k_zoom $k_settings | layout: $layout_mode"
 if [ -f "$out" ] \
    && grep -qxF "$marker" "$out" 2>/dev/null \
    && [ ! "$self" -nt "$out" ] \
@@ -93,6 +106,11 @@ yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
 qc="$(yaml_quote "$k_commit")"
 qz="$(yaml_quote "$k_zoom")"
 qs="$(yaml_quote "$k_settings")"
+
+case "$layout_mode" in
+  expanded) side_panel_width="0.3333" ;;
+  *)        side_panel_width="0.99" ;;
+esac
 
 # --- KEY_SETTINGS 的面板级冲突 → <disabled> ---------------------------------
 # free-keys.py check 输出 "<ctx>\t<section>.<action>";universal 段不用管
@@ -126,56 +144,39 @@ tmp="$out.tmp.$$"
 # generated.yml — machine-generated, do not edit(由 gen-config-layer.sh 生成)
 EOF
   # marker 行:记录生成时用的键,供缓存判断"keys.conf 已删但本文件非默认键"
-  printf '# keys: %s %s %s\n' "$k_commit" "$k_zoom" "$k_settings"
+  printf '# keys: %s %s %s | layout: %s\n' \
+    "$k_commit" "$k_zoom" "$k_settings" "$layout_mode"
   cat <<'EOF'
 #
 # 改键请走设置页(lazygit 里按设置键),或手改 keys.conf 后重开 lazygit。
 # 想覆盖这里的任何配置,写 lazygit-user.yml(它在本文件之后加载,永远赢)。
+EOF
+  printf 'gui:\n  sidePanelWidth: %s\n' "$side_panel_width"
+  cat <<'EOF'
+  expandFocusedSidePanel: true
+  portraitMode: never
+
 customCommands:
 EOF
 
-  # -- KEY_COMMIT:AI 生成 commit message(files 面板)------------------------
+  # -- KEY_COMMIT:打开即时反馈、可编辑的 AI commit pane(files 面板)---------
   printf '  - key: %s\n' "$qc"
   cat <<'EOF'
     context: 'files'
-    description: 'AI 生成 commit message'
-    loadingText: '正在提交…'
-    output: 'log'
-    # lazygit 不会把命令交给 shell 展开,所以显式用 sh -c 包一层,让
-    # $HERDR_LAZYGIT_ROOT 得以展开;选中值通过位置参数 $1 传入,避免转义问题。
-    # 脚本的错误提示行以 "(" 开头(如 "(没有 staged 改动 …)"),
-    # 选中这类行时不会真正 commit,只把提示回显到 command log。
-    prompts:
-      - type: 'menuFromCommand'
-        title: 'AI commit message 候选(生成中,可能需要几秒…)'
-        key: 'Msg'
-        command: "sh -c 'bash \"$HERDR_LAZYGIT_ROOT/scripts/ai-commit-msg.sh\" candidates'"
+    description: '打开 AI commit pane'
+    output: 'none'
     command: >-
-      sh -c 'case "$1" in "("*) printf "%s\n" "$1" ;; *) git commit -m "$1" ;; esac' sh {{.Form.Msg | quote}}
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/open-ai-commit-pane.sh"'
 EOF
 
-  # -- KEY_ZOOM ×3:在 herdr pane 中放大查看 ----------------------------------
+  # -- KEY_ZOOM:全局切换 sidebar / expanded 布局 ---------------------------
   printf '\n  - key: %s\n' "$qz"
   cat <<'EOF'
-    context: 'files'
-    description: '在 herdr pane 中放大查看 diff'
+    context: 'global'
+    description: '展开/收起 lazygit'
+    output: 'none'
     command: >-
-      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" file "$1"' sh {{.SelectedPath | quote}}
-EOF
-  printf '\n  - key: %s\n' "$qz"
-  cat <<'EOF'
-    context: 'commits, subCommits, reflogCommits'
-    description: '在 herdr pane 中放大查看 commit'
-    command: >-
-      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" commit "$1"' sh {{.SelectedCommit.Hash | quote}}
-EOF
-  printf '\n  - key: %s\n' "$qz"
-  cat <<'EOF'
-    context: 'stash'
-    description: '在 herdr pane 中放大查看 stash'
-    # 注意:Index 是 int,不能过 quote(template 会报 wrong type),裸插值即可
-    command: >-
-      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/show-diff-pane.sh" stash "$1"' sh {{.SelectedStashEntry.Index}}
+      sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/toggle-expand.sh"'
 EOF
 
   # -- KEY_SETTINGS:插件设置面板(global)------------------------------------

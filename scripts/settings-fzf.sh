@@ -25,7 +25,8 @@
 #   ai-backend.conf  AI_BACKEND / AI_<BACKEND>_MODEL / AI_CUSTOM_CMD
 #   keys.conf        KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS(缺失 = 插件默认;
 #                    只存插件三动词的键,内置键重映射请编辑 lazygit-user.yml)
-#   panel.conf       SIDEBAR_COLS / DIFF_COLS / SETTINGS_COLS
+#   panel.conf       SIDEBAR_COLS / EXPAND_COLS / COMMIT_COLS / SETTINGS_COLS
+#                    / LAYOUT_MODE
 #
 # 测试钩子:HERDR_LAZYGIT_GEN_SH / HERDR_LAZYGIT_FREE_KEYS 可覆盖
 # gen-config-layer.sh / free-keys.py 的路径(自测用,平时不用设)。
@@ -71,7 +72,7 @@ PANEL_CONF="$CONFIG_DIR/panel.conf"
 
 KEYS_CONF_HEADER='# keys.conf — herdr-lazygit 插件三动词的键位(设置页写入,gen-config-layer.sh 读取)。
 # 只存插件动词的键;想重映射 lazygit 内置键请编辑 lazygit-user.yml。'
-PANEL_CONF_HEADER='# panel.conf — herdr-lazygit 面板几何(列数)。设置页写入,各 pane 脚本读取。'
+PANEL_CONF_HEADER='# panel.conf — herdr-lazygit 面板几何与布局状态。设置页和布局脚本写入。'
 
 MSG=""        # 上一步操作的结果,显示在主菜单 header 里
 GEN_NOTE=""   # regen 的结果说明(拼进 MSG)
@@ -86,7 +87,8 @@ load_confs() {
   AI_CLAUDE_MODEL="haiku"; AI_CODEX_MODEL=""
   AI_OPENCODE_MODEL="google/gemini-2.5-flash"; AI_GEMINI_MODEL=""
   KEY_COMMIT=""; KEY_ZOOM=""; KEY_SETTINGS=""
-  SIDEBAR_COLS=""; DIFF_COLS=""; SETTINGS_COLS=""
+  SIDEBAR_COLS=""; EXPAND_COLS=""; COMMIT_COLS=""; SETTINGS_COLS=""
+  LAYOUT_MODE="sidebar"
   # shellcheck disable=SC1090
   { [ -f "$AI_CONF" ] && . "$AI_CONF"; } || true
   # shellcheck disable=SC1090
@@ -162,10 +164,11 @@ AI 后端
 AI 模型
 AI Prompt
 键位:Commit
-键位:Zoom
+键位:展开
 键位:Settings
 侧栏宽度
-放大窗宽度
+展开宽度
+AI 提交窗宽度
 EOF
 }
 
@@ -211,9 +214,9 @@ cmd_preview() {
       printf '当前:%s\n\n' "${KEY_COMMIT:-${DEF_KEY_COMMIT}(插件默认)}"
       printf '说明:files 面板里触发 AI commit message 全流程。\n默认 C 遮蔽 lazygit 低频内置「用 git editor 提交」。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
       ;;
-    "键位:Zoom")
+    "键位:展开")
       printf '当前:%s\n\n' "${KEY_ZOOM:-${DEF_KEY_ZOOM}(插件默认)}"
-      printf '说明:在 files/commits/stash 面板把 diff 放大到侧栏右侧的宽 pane。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
+      printf '说明:全局切换 lazygit 的侧栏/展开布局。\n改键会经 free-keys.py 校验,与内置键冲突将被拒绝。\n'
       ;;
     "键位:Settings")
       printf '当前:%s\n\n' "${KEY_SETTINGS:-${DEF_KEY_SETTINGS}(插件默认)}"
@@ -225,15 +228,23 @@ cmd_preview() {
       else
         printf '当前:42 列(默认)\n\n'
       fi
-      printf '说明:lazygit 侧栏 pane 的列数(panel.conf 的 SIDEBAR_COLS)。\n放大/设置 pane 关闭时也会把侧栏还原到这个宽度。\n'
+      printf '说明:lazygit 侧栏 pane 的列数(panel.conf 的 SIDEBAR_COLS)。\n辅助 pane 关闭或 U 收起时会还原到这个宽度。\n'
       ;;
-    "放大窗宽度")
-      if [ -n "$DIFF_COLS" ]; then
-        printf '当前:%s 列\n\n' "$DIFF_COLS"
+    "展开宽度")
+      if [ -n "$EXPAND_COLS" ]; then
+        printf '当前:%s 列\n\n' "$EXPAND_COLS"
       else
-        printf '当前:自适应(tab 宽的 45%%)\n\n'
+        printf '当前:110 列(默认)\n\n'
       fi
-      printf '说明:Zoom 放大 diff pane 的列数(panel.conf 的 DIFF_COLS)。\n留空恢复自适应。\n'
+      printf '说明:按展开键后 lazygit pane 的目标列数(panel.conf 的 EXPAND_COLS)。\n实际值会限制在 tab 总宽减 20 列以内。\n'
+      ;;
+    "AI 提交窗宽度")
+      if [ -n "$COMMIT_COLS" ]; then
+        printf '当前:%s 列\n\n' "$COMMIT_COLS"
+      else
+        printf '当前:70 列(默认)\n\n'
+      fi
+      printf '说明:AI commit 生成、编辑 pane 的列数(panel.conf 的 COMMIT_COLS)。\n'
       ;;
     *)
       printf '(无预览)\n'
@@ -376,13 +387,13 @@ if len(b) == 1:
 
 # ---------------------------------------------------------------------------
 # 子流程:宽度(read 数字校验,写 panel.conf;留空 = 删除该项恢复默认)
-# 用法:flow_width <panel.conf 变量名> <显示名> <当前值描述>
+# 用法:flow_width <panel.conf 变量名> <显示名> <当前值描述> [最小值]
 # ---------------------------------------------------------------------------
 flow_width() {
-  local var="$1" label="$2" cur="$3" val
+  local var="$1" label="$2" cur="$3" min="${4:-20}" val
   clear
   printf '修改 [%s]  (当前:%s)\n\n' "$label" "$cur"
-  printf '输入新列数(纯数字,20–500;留空 = 恢复默认),Enter 确认:\n> '
+  printf '输入新列数(纯数字,%s–500;留空 = 恢复默认),Enter 确认:\n> ' "$min"
   IFS= read -r val || { MSG="已取消"; return 0; }
   if [ -z "$val" ]; then
     conf_del "$PANEL_CONF" "$var"
@@ -393,8 +404,8 @@ flow_width() {
   case "$val" in
     *[!0-9]*) MSG="[$label] 输入无效(需要纯数字),未修改"; return 0 ;;
   esac
-  if [ "$val" -lt 20 ] || [ "$val" -gt 500 ]; then
-    MSG="[$label] $val 超出范围(20–500),未修改"
+  if [ "$val" -lt "$min" ] || [ "$val" -gt 500 ]; then
+    MSG="[$label] $val 超出范围($min–500),未修改"
     return 0
   fi
   seed_conf "$PANEL_CONF" "$PANEL_CONF_HEADER"
@@ -429,15 +440,19 @@ Enter/双击 = 修改 · Esc/q = 退出'
       "AI 模型")       flow_model ;;
       "AI Prompt")     flow_prompt ;;
       "键位:Commit")  flow_key KEY_COMMIT "$DEF_KEY_COMMIT" "Commit" files ;;
-      "键位:Zoom")    flow_key KEY_ZOOM "$DEF_KEY_ZOOM" "Zoom" files commits subCommits reflogCommits stash ;;
+      "键位:展开")    flow_key KEY_ZOOM "$DEF_KEY_ZOOM" "展开" global ;;
       "键位:Settings") flow_key KEY_SETTINGS "$DEF_KEY_SETTINGS" "Settings" global ;;
       "侧栏宽度")
         load_confs
         flow_width SIDEBAR_COLS "侧栏宽度" "${SIDEBAR_COLS:-42(默认)}"
         ;;
-      "放大窗宽度")
+      "展开宽度")
         load_confs
-        flow_width DIFF_COLS "放大窗宽度" "${DIFF_COLS:-自适应(tab 宽 45%)}"
+        flow_width EXPAND_COLS "展开宽度" "${EXPAND_COLS:-110(默认)}" 80
+        ;;
+      "AI 提交窗宽度")
+        load_confs
+        flow_width COMMIT_COLS "AI 提交窗宽度" "${COMMIT_COLS:-70(默认)}" 40
         ;;
       "") return 0 ;;
     esac
