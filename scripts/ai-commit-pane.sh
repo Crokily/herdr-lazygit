@@ -79,6 +79,7 @@ candidates_file="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.candidates.XXXXXX")"
 error_file="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.ai-error.XXXXXX")"
 commit_out="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.commit-out.XXXXXX")"
 commit_err="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.commit-err.XXXXXX")"
+preview_file="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.preview.XXXXXX")"
 ai_pid=""
 
 cleanup() {
@@ -86,7 +87,7 @@ cleanup() {
     kill "$ai_pid" >/dev/null 2>&1 || true
     wait "$ai_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$candidates_file" "$error_file" "$commit_out" "$commit_err"
+  rm -f "$candidates_file" "$error_file" "$commit_out" "$commit_err" "$preview_file"
 }
 cancel_generation() {
   printf '\r\033[2K已取消 AI 生成。\n'
@@ -100,6 +101,22 @@ cancel_generation() {
 trap cleanup EXIT
 trap cancel_generation INT TERM
 
+# 预渲染"即将提交"预览(静态内容,只渲染一次,fzf preview 里 cat 即可):
+# 一行 shortstat 当标题,下面是 delta 渲染的完整 staged diff(滚轮可滚)。
+# 树状文件列表左边 lazygit 已有,这里只放侧栏单栏模式下看不到的东西。
+cols="$(tput cols 2>/dev/null || echo 80)"
+shortstat="$(git -C "$repo" diff --cached --shortstat | sed 's/^ *//')"
+{
+  printf '\033[1m%s\033[0m\n\n' "${shortstat:-无 staged 改动}"
+  if command -v delta >/dev/null 2>&1; then
+    git -C "$repo" diff --cached | delta --paging=never --width "$((cols > 4 ? cols - 2 : cols))" || true
+  else
+    git -C "$repo" -c color.diff=always diff --cached || true
+  fi
+} > "$preview_file" 2>/dev/null || true
+
+# 等待期先把提交规模亮出来,这几秒可以开始想 message 了
+printf '即将提交:%s\n\n' "${shortstat:-?}"
 printf '⏳ AI 生成中…(Ctrl-C 取消)'
 HERDR_PLUGIN_CONFIG_DIR="$config_dir" bash "$AI_SH" candidates \
   >"$candidates_file" 2>"$error_file" &
@@ -140,11 +157,20 @@ if [ -z "$first_line" ]; then
   exit 0
 fi
 
+# preview:上半是选中候选的完整 message(永不截断),下半 cat 预渲染的
+# staged diff。{} 由 fzf 以安全引号替换;列表过滤到空时显示自写提示。
+q_preview_file="$(python3 -c 'import shlex,sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$preview_file")"
+preview_cmd='msg={}; if [ -n "$msg" ]; then printf "\033[1m✏ %s\033[0m\n\n" "$msg"; else printf "\033[1m✏ (输入框内容将作为 message)\033[0m\n\n"; fi; cat '"$q_preview_file"
+
 fzf_out=""
 fzf_rc=0
 fzf_out="$(fzf --layout=reverse --no-multi --print-query \
   --prompt='Commit message > ' \
-  --header='回车=提交选中项 · 输入框可直接编辑/自写 message 后回车 · Esc=取消' \
+  --header='回车=提交 · 直接打字=编辑/自写 · Esc=取消' \
+  --wrap --gap 1 --gap-line --highlight-line \
+  --preview "$preview_cmd" \
+  --preview-window 'down,65%,wrap' \
+  --preview-label '─ 即将提交 ' \
   --bind 'double-click:accept' < "$candidates_file")" || fzf_rc=$?
 
 # Esc/中断返回 >=2;无匹配但保留 query 时 fzf 可返回 1,仍按 query 提交。
