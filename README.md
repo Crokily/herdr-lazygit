@@ -56,13 +56,15 @@ One of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemin
 
 ## Install
 
-Requires herdr >= 0.7.0. `lazygit` and `fzf` are checked at install time and installed via Homebrew if missing.
+Requires herdr >= 0.7.0 plus `bash`, `git`, and Python >= 3.7 (`python3`) on `PATH`. During a GitHub install, the plugin downloads pinned private copies of lazygit 0.63.0 and fzf 0.74.0, verifies repository-pinned SHA-256 digests, and stores them under its managed `bin/` directory. It never invokes Homebrew, a system package manager, or `sudo`. The build also needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`.
 
 ```sh
 herdr plugin install crokily/herdr-lazygit
 
-# Or link a local checkout during development
-herdr plugin link /path/to/herdr-lazygit
+# Local development: plugin link does not run [[build]], so prepare the runtime first.
+cd /path/to/herdr-lazygit
+/bin/sh scripts/install-runtime.sh
+herdr plugin link "$PWD"
 ```
 
 Then add keybindings to your herdr `config.toml`:
@@ -70,18 +72,18 @@ Then add keybindings to your herdr `config.toml`:
 ```toml
 [[keys.command]]              # lazygit: open in a split
 key = "prefix+g"
-type = "shell"
-command = "herdr plugin action invoke open --plugin herdr-lazygit"
+type = "plugin_action"
+command = "herdr-lazygit.open"
 
 [[keys.command]]              # lazygit: open in its own tab
 key = "prefix+shift+g"
-type = "shell"
-command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
+type = "plugin_action"
+command = "herdr-lazygit.open-tab"
 ```
 
 Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
 
-> **Note (herdr platform behavior):** an action's context always resolves from the pane that currently has **UI focus**, not from the process that invoked it. Invoking `herdr plugin action invoke …` from a background pane or script opens lazygit next to the user's focused pane, takes its cwd from that pane, and steals focus. Trigger these actions only through foreground keybindings.
+> **Note (herdr platform behavior):** an action's context always resolves from the pane that currently has **UI focus**, not from a background process. The action opens lazygit next to the user's focused pane, takes its cwd from that pane, and focuses the new pane. Trigger these actions only through foreground keybindings.
 
 ## Reference
 
@@ -124,9 +126,12 @@ To remap a plugin key, use the settings pane (stored in `keys.conf`). To remap a
 herdr-plugin.toml            # plugin manifest
 lazygit-config.yml           # bundled base config (factory layer)
 DESIGN.md                    # design doc: three-verb model, key rules, config layers
+THIRD_PARTY_NOTICES.md       # licenses for downloaded lazygit/fzf binaries
+bin/                         # generated private lazygit + fzf runtime (not committed)
 scripts/
-  ensure-lazygit.sh          # install-time: detect/install lazygit
-  ensure-fzf.sh              # install-time: detect/install fzf (settings + commit UI)
+  install-runtime.sh         # install-time: download + verify the private runtime
+  runtime-versions.sh        # pinned lazygit/fzf versions
+  runtime-env.sh             # resolve runtime tools by absolute path
   run-lazygit.sh             # pane entrypoint: regenerate config layer, exec lazygit
   open-lazygit.sh            # action: open in a split (idempotent open/focus/toggle)
   open-lazygit-tab.sh        # action: open in a tab

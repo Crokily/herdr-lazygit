@@ -6,20 +6,16 @@
 
 id = "herdr-lazygit"
 name = "herdr-lazygit"
-version = "0.1.0"
+version = "0.1.1"
 description = "lazygit in a herdr split pane, with AI-assisted commit messages via custom commands."
 min_herdr_version = "0.7.0"
 platforms = ["linux", "macos"]
 
-# Install-time build step: make sure the `lazygit` binary is available
-# (install via Homebrew when possible, otherwise print instructions and fail).
+# Install the pinned, plugin-private lazygit + fzf runtime for this platform.
+# The build downloads official release archives, verifies repository-pinned
+# SHA-256 digests, and writes only under this managed checkout's bin/ directory.
 [[build]]
-command = ["/bin/sh", "scripts/ensure-lazygit.sh"]
-
-# Install-time build step: make sure `fzf` is available (the settings and AI
-# commit pane menus are built on it).
-[[build]]
-command = ["/bin/sh", "scripts/ensure-fzf.sh"]
+command = ["/bin/sh", "scripts/install-runtime.sh"]
 
 # The lazygit pane. The [[actions]] below summon it; run-lazygit.sh assembles the
 # layered LG_CONFIG_FILE (bundled config + user override) and then execs lazygit.

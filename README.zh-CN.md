@@ -56,13 +56,15 @@
 
 ## 安装
 
-要求 herdr >= 0.7.0。`lazygit` 和 `fzf` 在插件安装时自动检测,缺失时通过 Homebrew 安装。
+要求 herdr >= 0.7.0,并确保 `bash`、`git`、Python >= 3.7(`python3`)在 `PATH` 上。通过 GitHub 安装时,插件会下载固定版本的私有 lazygit 0.63.0 与 fzf 0.74.0,用仓库内固定的 SHA-256 校验值验证后存入 Herdr 管理的插件 `bin/` 目录。安装过程不会调用 Homebrew、系统包管理器或 `sudo`。构建阶段还需要 `curl` 或 `wget`、`tar`,以及 `sha256sum` 或 `shasum`。
 
 ```sh
 herdr plugin install crokily/herdr-lazygit
 
-# 或本地开发时软链
-herdr plugin link /path/to/herdr-lazygit
+# 本地开发:plugin link 不执行 [[build]],所以先准备私有 runtime
+cd /path/to/herdr-lazygit
+/bin/sh scripts/install-runtime.sh
+herdr plugin link "$PWD"
 ```
 
 然后在 herdr 的 `config.toml` 里添加快捷键:
@@ -70,18 +72,18 @@ herdr plugin link /path/to/herdr-lazygit
 ```toml
 [[keys.command]]              # lazygit:分屏打开
 key = "prefix+g"
-type = "shell"
-command = "herdr plugin action invoke open --plugin herdr-lazygit"
+type = "plugin_action"
+command = "herdr-lazygit.open"
 
 [[keys.command]]              # lazygit:独立 tab 打开
 key = "prefix+shift+g"
-type = "shell"
-command = "herdr plugin action invoke open-tab --plugin herdr-lazygit"
+type = "plugin_action"
+command = "herdr-lazygit.open-tab"
 ```
 
 执行 `herdr server reload-config` 后生效。`prefix+g` 的行为:未打开 → 分屏打开;已打开但未聚焦 → 聚焦;已聚焦 → 关闭。
 
-> **注意(herdr 平台行为)**:action 的上下文永远取自 herdr 当前 **UI 聚焦**的 pane,而不是发起调用的进程。从后台 pane 或脚本执行 `herdr plugin action invoke …` 会把 lazygit 开在用户聚焦 pane 旁边、使用那个 pane 的 cwd,并夺走焦点。只通过前台键位绑定触发这两个 action。
+> **注意(herdr 平台行为)**:action 的上下文永远取自 herdr 当前 **UI 聚焦**的 pane,而不是后台进程。它会把 lazygit 开在用户聚焦 pane 旁边、使用该 pane 的 cwd,并聚焦新 pane。只通过前台键位绑定触发这两个 action。
 
 ## 细节备查
 
@@ -124,9 +126,12 @@ AI_CUSTOM_CMD=""
 herdr-plugin.toml            # 插件 manifest
 lazygit-config.yml           # 捆绑的基础配置(出厂层)
 DESIGN.md                    # 设计文档:三动词模型、选键规则、三层配置
+THIRD_PARTY_NOTICES.md       # 下载的 lazygit/fzf 二进制许可证
+bin/                         # 构建生成的私有 lazygit + fzf runtime(不提交)
 scripts/
-  ensure-lazygit.sh          # 安装时检测/安装 lazygit
-  ensure-fzf.sh              # 安装时检测/安装 fzf(设置页 + commit UI)
+  install-runtime.sh         # 安装时下载并校验私有 runtime
+  runtime-versions.sh        # 固定的 lazygit/fzf 版本
+  runtime-env.sh             # 用绝对路径解析 runtime 工具
   run-lazygit.sh             # pane 入口:重新生成配置层后 exec lazygit
   open-lazygit.sh            # action:分屏打开(幂等 open/focus/toggle)
   open-lazygit-tab.sh        # action:tab 打开

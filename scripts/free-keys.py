@@ -4,8 +4,8 @@
 keys for the herdr-lazygit plugin.
 
 Data source: the keybinding section of the default configuration printed by
-`lazygit --config` (following the installed lazygit version rather than a
-hard-coded key table). Uses only the standard library and includes a small
+the plugin-private `lazygit --config` (following the pinned runtime rather than
+a hard-coded key table). Uses only the standard library and includes a small
 indentation-based parser for that output instead of PyYAML.
 
 Usage:
@@ -42,6 +42,7 @@ Analysis conclusions (lazygit 0.63.0, recorded in the DESIGN.md appendix):
                → ; ✓ (free in all panels)                    => default ;
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -107,13 +108,14 @@ def load_bindings():
     flow lists [a, b], and block lists with `- item`.
     """
     try:
+        lazygit = os.environ.get("HERDR_LAZYGIT_BIN", "lazygit")
         out = subprocess.run(
-            ["lazygit", "--config"],
+            [lazygit, "--config"],
             capture_output=True, text=True, check=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError) as e:
-        sys.stderr.write("free-keys.py: unable to run `lazygit --config` (%s); "
-                         "run scripts/ensure-lazygit.sh first\n" % e)
+        sys.stderr.write("free-keys.py: unable to run the plugin lazygit runtime (%s); "
+                         "run scripts/install-runtime.sh first\n" % e)
         sys.exit(2)
 
     sections = {}

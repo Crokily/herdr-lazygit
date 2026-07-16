@@ -15,6 +15,7 @@
 set -euo pipefail
 
 [ "${HERDR_ENV:-}" = "1" ] || { echo "open-settings-pane.sh: not inside herdr" >&2; exit 1; }
+herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 helper="$script_dir/layout-helper.py"
@@ -47,7 +48,7 @@ case "$SETTINGS_COLS" in *[!0-9]*|'') SETTINGS_COLS=70 ;; esac
 restore_cols="$SIDEBAR_COLS"
 if [ "$LAYOUT_MODE" = "expanded" ]; then
   restore_cols="$EXPAND_COLS"
-  tab_width="$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
+  tab_width="$("$herdr_bin" pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
 import json, sys
 try:
     print(int(json.load(sys.stdin)["result"]["layout"]["area"]["width"]))
@@ -62,7 +63,7 @@ except Exception:
 fi
 
 # --- Single instance: close an existing GitSettings pane in this tab --------
-panes_json="$(herdr pane list 2>/dev/null || true)"
+panes_json="$("$herdr_bin" pane list 2>/dev/null || true)"
 printf '%s' "$panes_json" | python3 -c '
 import json, sys
 tab = sys.argv[1]
@@ -73,28 +74,28 @@ except Exception:
 for p in panes:
     if p.get("tab_id") == tab and p.get("label") == "GitSettings":
         print(p["pane_id"])
-' "$HERDR_TAB_ID" | while read -r old; do herdr pane close "$old" >/dev/null 2>&1 || true; done
+' "$HERDR_TAB_ID" | while read -r old; do "$herdr_bin" pane close "$old" >/dev/null 2>&1 || true; done
 
 # --- Open the Settings pane and apply its geometry --------------------------
-new_pane="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
+new_pane="$("$herdr_bin" pane split --pane "$HERDR_PANE_ID" --direction right --ratio 0.5 --focus 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 [ -n "$new_pane" ] || { echo "open-settings-pane.sh: pane split failed" >&2; exit 1; }
 
-herdr pane rename "$new_pane" "GitSettings" >/dev/null 2>&1 || true
+"$herdr_bin" pane rename "$new_pane" "GitSettings" >/dev/null 2>&1 || true
 python3 "$helper" place-diff "$HERDR_PANE_ID" "$new_pane" "$SIDEBAR_COLS" "$SETTINGS_COLS" 2>/dev/null || true
 
 # Restore lazygit's width before exit. If settings-fzf.sh fails (for example,
 # fzf is missing), sleep so the message remains readable. The final exit makes
 # the pane disappear immediately after q/Esc.
 restore_cmd="python3 $(shq "$helper") set-region-width $(shq "$HERDR_PANE_ID") $(shq "$restore_cols")"
-# Pass the configuration directory explicitly. pane run starts a fresh shell
-# that does not inherit HERDR_PLUGIN_CONFIG_DIR from lazygit (the plugin pane).
-# Without it, Settings writes to the fallback directory while lazygit reads the
-# plugin configuration directory, so changes never take effect.
-if ! herdr pane run "$new_pane" "clear; HERDR_PLUGIN_CONFIG_DIR=$(shq "$config_dir") bash $(shq "$settings_sh") || sleep 4; $restore_cmd >/dev/null 2>&1; exit" >/dev/null; then
+# Pass the Herdr binary and configuration directory explicitly. pane run starts
+# a fresh shell that does not inherit these values from lazygit (the plugin
+# pane). Without them, Settings can write to the fallback directory and the
+# restore helper can call the wrong Herdr binary.
+if ! "$herdr_bin" pane run "$new_pane" "clear; export HERDR_BIN_PATH=$(shq "$herdr_bin") HERDR_PLUGIN_CONFIG_DIR=$(shq "$config_dir"); bash $(shq "$settings_sh") || sleep 4; $restore_cmd >/dev/null 2>&1; exit" >/dev/null; then
   # A failed run leaves an empty shell pane; close it and restore the sidebar so
   # the user is not left with debris.
-  herdr pane close "$new_pane" >/dev/null 2>&1 || true
+  "$herdr_bin" pane close "$new_pane" >/dev/null 2>&1 || true
   python3 "$helper" set-region-width "$HERDR_PANE_ID" "$restore_cols" >/dev/null 2>&1 || true
   echo "open-settings-pane.sh: pane run failed" >&2
   exit 1
