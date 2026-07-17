@@ -165,7 +165,7 @@ sys.stdout.write("\n".join(out))
 }
 
 # Build the exact staged-diff payload passed to the AI CLI. Small diffs go
-# through unchanged; large diffs become a structured sample with a complete
+# through unchanged; large diffs become a structured sample with a budgeted
 # per-file overview, a fair round-robin hunk sample, and a coverage note.
 build_ai_diff_payload() {
   python3 - "$DIFF_MAX_CHARS" <<'PY'
@@ -176,11 +176,6 @@ import sys
 limit = int(sys.argv[1])
 lockfiles = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock"}
 coverage_text = "input is a sample of the staged diff"
-coverage_placeholder = (
-    "\nCOVERAGE: sampled 9999/9999 files, 99999/99999 hunks; "
-    + coverage_text
-    + "\n"
-)
 patch_section_header = "\nPATCH SAMPLE\n"
 
 
@@ -290,6 +285,22 @@ def is_deprioritized(path, binary):
     )
 
 
+def escape_control_chars(text):
+    escaped = []
+    for ch in text:
+        if ch == "\n":
+            escaped.append("\\n")
+        elif ch == "\r":
+            escaped.append("\\r")
+        elif ch == "\t":
+            escaped.append("\\t")
+        elif ord(ch) < 32 or ord(ch) == 127:
+            escaped.append("\\x%02x" % ord(ch))
+        else:
+            escaped.append(ch)
+    return "".join(escaped)
+
+
 def split_patch(patch_text):
     if not patch_text:
         return "", []
@@ -323,7 +334,22 @@ def load_patch_text(path, old_path):
     return ""
 
 
-def render_overview(files, total_added, total_deleted, binary_files):
+def coverage_note(sampled_files, total_files, sampled_hunks, total_hunks):
+    return (
+        "COVERAGE: sampled %d/%d files, %d/%d hunks; %s\n"
+        % (sampled_files, total_files, sampled_hunks, total_hunks, coverage_text)
+    )
+
+
+def render_overview_lines(lines):
+    return "\n".join(lines) + "\n"
+
+
+def overview_keep_sort_key(entry):
+    return (entry["deprioritized"], -entry["diff_weight"], entry["index"])
+
+
+def render_overview(files, total_added, total_deleted, binary_files, limit, coverage_reserve):
     total_line = "total: %d files, +%d -%d" % (len(files), total_added, total_deleted)
     if binary_files:
         total_line += ", %d binary" % binary_files
@@ -333,8 +359,36 @@ def render_overview(files, total_added, total_deleted, binary_files):
             count_text = "binary"
         else:
             count_text = "+%d -%d" % (entry["added"], entry["deleted"])
-        lines.append("%s %s %s" % (entry["status"], count_text, entry["display"]))
-    return "\n".join(lines) + "\n"
+        entry["overview_row"] = "%s %s %s" % (entry["status"], count_text, entry["display"])
+        lines.append(entry["overview_row"])
+
+    full_text = render_overview_lines(lines)
+    if len(full_text) + 1 + coverage_reserve <= limit:
+        return full_text
+
+    ranked = sorted(files, key=overview_keep_sort_key)
+    kept_rows = []
+    kept_count = 0
+    for entry in ranked:
+        candidate_rows = kept_rows + [entry["overview_row"]]
+        omitted = len(files) - len(candidate_rows)
+        candidate_lines = list(lines[:2]) + candidate_rows
+        if omitted > 0:
+            candidate_lines.append("... %d more files not listed" % omitted)
+        candidate_text = render_overview_lines(candidate_lines)
+        if len(candidate_text) + 1 + coverage_reserve > limit:
+            break
+        kept_rows = candidate_rows
+        kept_count = len(candidate_rows)
+
+    omitted = len(files) - kept_count
+    truncated_lines = list(lines[:2]) + kept_rows
+    if omitted > 0:
+        truncated_lines.append("... %d more files not listed" % omitted)
+    truncated_text = render_overview_lines(truncated_lines)
+    if len(truncated_text) + 1 + coverage_reserve > limit:
+        raise AssertionError("overview exceeds DIFF_MAX_CHARS budget")
+    return truncated_text
 
 
 def select_hunks(files, budget):
@@ -384,10 +438,7 @@ def render_output(files, overview_text):
         block += "".join(entry["chunks"][idx] for idx in entry["selected"])
         patch_blocks.append(block)
 
-    coverage_note = (
-        "COVERAGE: sampled %d/%d files, %d/%d hunks; %s\n"
-        % (sampled_files, len(files), sampled_hunks, total_hunks, coverage_text)
-    )
+    coverage_line = coverage_note(sampled_files, len(files), sampled_hunks, total_hunks)
 
     pieces = [overview_text]
     if patch_blocks:
@@ -396,7 +447,7 @@ def render_output(files, overview_text):
         if not patch_blocks[-1].endswith("\n"):
             pieces.append("\n")
     pieces.append("\n")
-    pieces.append(coverage_note)
+    pieces.append(coverage_line)
     return "".join(pieces)
 
 
@@ -445,14 +496,16 @@ for idx in range(file_count):
     header, chunks = split_patch(patch_text)
     files.append(
         {
+            "index": len(files),
             "status": status,
-            "display": display,
+            "display": escape_control_chars(display),
             "path": path,
             "old_path": old_path,
             "added": added or 0,
             "deleted": deleted or 0,
             "binary": binary,
             "deprioritized": is_deprioritized(path, binary),
+            "diff_weight": 0 if binary else int(added or 0) + int(deleted or 0),
             "header": header,
             "chunks": chunks,
             "cursor": 0,
@@ -460,14 +513,19 @@ for idx in range(file_count):
         }
     )
 
-overview_text = render_overview(files, total_added, total_deleted, binary_files)
-patch_budget = limit - len(overview_text) - len(patch_section_header) - len(coverage_placeholder)
+total_hunks = sum(len(entry["chunks"]) for entry in files)
+coverage_reserve = len(coverage_note(len(files), len(files), total_hunks, total_hunks))
+overview_text = render_overview(files, total_added, total_deleted, binary_files, limit, coverage_reserve)
+patch_budget = limit - len(overview_text) - 1 - coverage_reserve - len(patch_section_header) - 1
 if patch_budget > 0:
     select_hunks(files, patch_budget)
 
 assembled = render_output(files, overview_text)
 while len(assembled) > limit and drop_last_chunk(files):
     assembled = render_output(files, overview_text)
+
+if len(assembled) > limit:
+    raise AssertionError("sampled diff exceeded DIFF_MAX_CHARS")
 
 sys.stdout.write(assembled)
 PY

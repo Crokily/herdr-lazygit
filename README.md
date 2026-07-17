@@ -54,7 +54,7 @@ One of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemin
 
 ### AI data disclosure
 
-Pressing `C` sends the staged diff plus the prompt text for this plugin to the selected AI CLI on this machine. If the staged diff fits within the configured `DIFF_MAX_CHARS` budget (8,000 by default), it is sent unchanged; otherwise the plugin sends a structured sample that always includes a complete per-file overview (status plus `+/-` line counts for every staged file) and then a bounded patch sample.
+Pressing `C` sends the staged diff plus the prompt text for this plugin to the selected AI CLI on this machine. If the staged diff fits within the configured `DIFF_MAX_CHARS` budget (8,000 by default), it is sent unchanged; otherwise the plugin sends a structured sample with a per-file overview (status plus `+/-` line counts for every staged file that fits in the budget, plus a marker when rows are omitted) and then a bounded patch sample.
 
 That CLI then forwards the request to its provider's service under **your** account; that provider's billing, retention, and privacy policies apply. Nothing is sent at any other time. The plugin itself collects nothing and has no telemetry.
 

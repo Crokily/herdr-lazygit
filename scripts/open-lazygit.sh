@@ -8,11 +8,11 @@
 #
 # Our pane is identified by its manifest title ("Git"), a foreground process
 # check (`herdr pane process-info`) confirming lazygit actually runs there,
-# and repo/worktree identity: only a pane whose `foreground_cwd` (fallback
-# `cwd`) resolves to the SAME git worktree as the launch target is reusable.
-# A user's own pane merely labeled "Git", or a lazygit pane for a different
-# repo/worktree, is left alone. Any failure (herdr CLI error, JSON parse
-# error, cwd/git resolution failure) degrades to OPEN.
+# and path identity: only a pane whose `foreground_cwd`/`cwd` candidates
+# resolve in order to the SAME git worktree, bare repo, or non-git directory
+# as the launch target is reusable. A user's own pane merely labeled "Git", or
+# a lazygit pane for a different target, is left alone. Any failure (herdr CLI
+# error, JSON parse error, cwd/git resolution failure) degrades to OPEN.
 #
 # The pane's initial cwd comes from HERDR_PLUGIN_CONTEXT_JSON:
 # focused_pane_cwd, else workspace_cwd, else $HOME.
@@ -161,43 +161,50 @@ def normalize_dir(path):
         return None
     return resolved if os.path.isdir(resolved) else None
 
-def git_toplevel(path):
-    try:
-        r = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:
-        return None
-    if r.returncode == 0:
-        return normalize_dir((r.stdout or "").strip())
-    msg = ((r.stderr or "") + "\n" + (r.stdout or "")).lower()
-    if "not a git repository" in msg:
-        return False
-    return None
-
 def resolve_identity(path):
     resolved = normalize_dir(path)
     if not resolved:
         return None
-    top = git_toplevel(resolved)
-    if top is None:
+    try:
+        top = subprocess.run(
+            ["git", "-C", resolved, "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
+        )
+    except Exception:
         return None
-    return {"dir": resolved, "git_top": top or None}
+    if top.returncode == 0:
+        top_dir = normalize_dir((top.stdout or "").strip())
+        if top_dir:
+            return {"kind": "worktree", "value": top_dir}
+        return None
+    try:
+        git_dir = subprocess.run(
+            ["git", "-C", resolved, "rev-parse", "--absolute-git-dir"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if git_dir.returncode == 0:
+        bare_dir = normalize_dir((git_dir.stdout or "").strip())
+        if bare_dir:
+            return {"kind": "bare", "value": bare_dir}
+        return None
+    return {"kind": "dir", "value": resolved}
 
-def pane_cwd(pane):
+def resolve_pane_identity(pane):
     for key in ("foreground_cwd", "cwd"):
         value = pane.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return ""
+        if not isinstance(value, str) or not value:
+            continue
+        identity = resolve_identity(value)
+        if identity:
+            return identity
+    return None
 
 def same_identity(a, b):
     if not a or not b:
         return False
-    if a["git_top"] and b["git_top"]:
-        return a["git_top"] == b["git_top"]
-    return a["dir"] == b["dir"]
+    return a["kind"] == b["kind"] and a["value"] == b["value"]
 
 candidates = [
     p for p in panes
@@ -216,7 +223,7 @@ def matches_target(pane):
         return False
     pane_id = pane.get("pane_id") or ""
     if pane_id not in pane_identity_cache:
-        pane_identity_cache[pane_id] = resolve_identity(pane_cwd(pane))
+        pane_identity_cache[pane_id] = resolve_pane_identity(pane)
     return same_identity(target_identity, pane_identity_cache[pane_id])
 
 # A pane freshly created by a just-finished `plugin pane open` can exist while

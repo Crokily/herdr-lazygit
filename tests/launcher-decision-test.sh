@@ -106,14 +106,17 @@ assert_decision() {
 main_repo="$tmp/main-repo"
 other_repo="$tmp/other-repo"
 worktree_repo="$tmp/main-repo-worktree"
+bare_repo="$tmp/shared-bare.git"
 make_repo "$main_repo"
 make_repo "$other_repo"
+git init --bare "$bare_repo" >/dev/null
 mkdir -p "$main_repo/subdir" "$other_repo/subdir"
 git -C "$main_repo" worktree add -b worktree-branch "$worktree_repo" >/dev/null
 mkdir -p "$worktree_repo/subdir"
 
 nongit_a="$tmp/non-git-a"
 nongit_b="$tmp/non-git-b"
+stale_dir="$tmp/does-not-exist"
 mkdir -p "$nongit_a" "$nongit_b"
 
 process_dir="$tmp/process-info"
@@ -124,6 +127,8 @@ write_process_info "$process_dir" pane-worktree lazygit lazygit
 write_process_info "$process_dir" pane-path lazygit lazygit
 write_process_info "$process_dir" pane-cross lazygit lazygit
 write_process_info "$process_dir" pane-tab lazygit lazygit
+write_process_info "$process_dir" pane-bare lazygit lazygit
+write_process_info "$process_dir" pane-fallback lazygit lazygit
 
 current_file="$tmp/current.json"
 cat > "$current_file" <<'EOF'
@@ -145,6 +150,22 @@ EOF
 assert_decision "CLOSE pane-same" \
   "$repo_root/scripts/open-lazygit.sh" "$main_repo" \
   "$same_repo_focused_panes" "$current_file" "$process_dir"
+
+same_bare_panes="$tmp/panes-same-bare.json"
+cat > "$same_bare_panes" <<EOF
+{"result":{"panes":[{"pane_id":"pane-bare","workspace_id":"ws-1","tab_id":"tab-1","label":"Git","focused":false,"cwd":"$bare_repo"}]}}
+EOF
+assert_decision "FOCUS pane-bare" \
+  "$repo_root/scripts/open-lazygit.sh" "$bare_repo" \
+  "$same_bare_panes" "$current_file" "$process_dir"
+
+same_bare_focused_panes="$tmp/panes-same-bare-focused.json"
+cat > "$same_bare_focused_panes" <<EOF
+{"result":{"panes":[{"pane_id":"pane-bare","workspace_id":"ws-1","tab_id":"tab-1","label":"Git","focused":true,"cwd":"$bare_repo"}]}}
+EOF
+assert_decision "CLOSE pane-bare" \
+  "$repo_root/scripts/open-lazygit.sh" "$bare_repo" \
+  "$same_bare_focused_panes" "$current_file" "$process_dir"
 
 different_repo_panes="$tmp/panes-different-repo.json"
 cat > "$different_repo_panes" <<EOF
@@ -178,6 +199,14 @@ assert_decision "OPEN" \
   "$repo_root/scripts/open-lazygit.sh" "$nongit_b" \
   "$nongit_different_path_panes" "$current_file" "$process_dir"
 
+fallback_repo_panes="$tmp/panes-fallback-repo.json"
+cat > "$fallback_repo_panes" <<EOF
+{"result":{"panes":[{"pane_id":"pane-fallback","workspace_id":"ws-1","tab_id":"tab-1","label":"Git","focused":false,"cwd":"$main_repo","foreground_cwd":"$stale_dir"}]}}
+EOF
+assert_decision "FOCUS pane-fallback" \
+  "$repo_root/scripts/open-lazygit.sh" "$main_repo/subdir" \
+  "$fallback_repo_panes" "$current_file" "$process_dir"
+
 cross_workspace_panes="$tmp/panes-cross-workspace.json"
 cat > "$cross_workspace_panes" <<EOF
 {"result":{"panes":[{"pane_id":"pane-cross","workspace_id":"ws-2","tab_id":"tab-9","label":"Git","focused":false,"cwd":"$main_repo"}]}}
@@ -194,6 +223,14 @@ assert_decision "SWITCHTAB tab-2" \
   "$repo_root/scripts/open-lazygit-tab.sh" "$main_repo" \
   "$tab_same_worktree_panes" "$current_file" "$process_dir"
 
+tab_same_bare_panes="$tmp/panes-tab-same-bare.json"
+cat > "$tab_same_bare_panes" <<EOF
+{"result":{"panes":[{"pane_id":"pane-tab","workspace_id":"ws-1","tab_id":"tab-2","label":"Git","focused":false,"cwd":"$bare_repo"}]}}
+EOF
+assert_decision "SWITCHTAB tab-2" \
+  "$repo_root/scripts/open-lazygit-tab.sh" "$bare_repo" \
+  "$tab_same_bare_panes" "$current_file" "$process_dir"
+
 tab_different_repo_panes="$tmp/panes-tab-different-repo.json"
 cat > "$tab_different_repo_panes" <<EOF
 {"result":{"panes":[{"pane_id":"pane-tab","workspace_id":"ws-1","tab_id":"tab-2","label":"Git","focused":false,"cwd":"$other_repo"}]}}
@@ -209,5 +246,10 @@ EOF
 assert_decision "OPEN" \
   "$repo_root/scripts/open-lazygit-tab.sh" "$main_repo" \
   "$tab_different_worktree_panes" "$current_file" "$process_dir"
+
+if grep -Fq 'not a git repository' "$repo_root/scripts/open-lazygit.sh" "$repo_root/scripts/open-lazygit-tab.sh"; then
+  echo 'launcher identity resolution should not inspect localized git stderr text' >&2
+  exit 1
+fi
 
 printf 'launcher decision tests passed\n'
