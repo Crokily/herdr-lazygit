@@ -19,6 +19,15 @@ set -euo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
+# --- runtime precheck --------------------------------------------------------
+# Same as open-lazygit.sh: surface a missing/broken runtime in the action's
+# stderr (captured by `herdr plugin log list`) instead of an instantly-dying pane.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC1091
+. "$script_dir/runtime-env.sh"
+herdr_lazygit_require_runtime lazygit || exit 1
+herdr_lazygit_version_notice || true
+
 # --- serialize concurrent launcher runs -------------------------------------
 # Same locking as open-lazygit.sh (see the comment there): action invokes are
 # fire-and-forget, so rapid repeats race the snapshot-then-act logic below.

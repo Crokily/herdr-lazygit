@@ -158,6 +158,19 @@ archive/hash utilities, and either curl or wget. Python is an explicit runtime
 requirement because pane geometry, JSON handling, locking, timeout handling,
 and key analysis use its standard library.
 
+Two relief valves temper the private runtime for existing lazygit users. The
+pane merges the user's own lazygit config file underneath the plugin's layers
+(layer 0; `INHERIT_USER_CONFIG=0` in panel.conf opts out), so personal themes
+and settings survive without weakening the plugin's ownership of the keys it
+generates. And `RUNTIME_LAZYGIT_BIN` / `RUNTIME_FZF_BIN` in panel.conf
+substitute explicit binaries — a deliberate, version-warned, unsupported
+escape hatch, which is not the same thing as implicit PATH lookup: the paths
+are absolute and chosen by the user. Launchers precheck the resolved runtime
+before opening a pane and report failures through action stderr (visible in
+`herdr plugin log list`); the pane entrypoint runs lazygit as a child rather
+than exec'ing it, so a startup rejection (for example an inherited config key
+unknown to the pinned version) leaves a readable error in the pane.
+
 ## 7. Strategic Boundaries and Stop Signals
 
 **Out of scope** (unreachable through the lazygit approach and therefore fake integration):
