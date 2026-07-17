@@ -47,6 +47,7 @@ sidebar                                  expanded
 - `U` updates the state and regenerates the GUI configuration first, then calls `set-width`, and finally injects CSI focus-in into lazygit. This hot-reloads both the layout and keybindings within the same keypress.
 - AI Commit / Settings remain temporary wide panes to the right of the sidebar. While one is visible, lazygit is temporarily set to `SIDEBAR_COLS`. Before it exits, it restores the sidebar/expanded width that was active when it opened; `exit` then closes the pane automatically.
 - Only one pane of each type may exist at a time. Any existing pane is found by label and closed first: `GitCommit` / `GitSettings`.
+- The `open` / `open-tab` launchers reuse only within the current workspace and only when the candidate pane's `foreground_cwd` (fallback `cwd`) resolves to the same git worktree as the launch target (`git rev-parse --show-toplevel` on both sides). Different repositories, different worktrees of the same repository, or any cwd/git-resolution failure all degrade to OPEN instead of reusing the wrong pane. If either side is not a git repo, the fallback identity is the directory path itself.
 - Widths are configurable through `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS`.
 
 In one sentence: **lazygit handles Git interactions; herdr decides how wide lazygit should be right now and where supporting UI should open.**

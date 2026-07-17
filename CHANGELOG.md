@@ -23,6 +23,9 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
   `haiku`, opencode uses `google/gemini-2.5-flash`, gemini uses
   `gemini-2.5-flash`, and codex uses the Codex CLI's configured default unless
   `AI_CODEX_MODEL` is set.
+- The `open` / `open-tab` launchers no longer reuse a `Git` pane from the
+  wrong repository or a different worktree of the same repository; reuse now
+  requires the same git worktree (or the same directory for non-git targets).
 
 ## [0.2.0] - 2026-07-17
 

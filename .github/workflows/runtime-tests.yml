@@ -35,6 +35,9 @@ jobs:
       - name: Test runtime resolution and config layering
         run: bash tests/runtime-resolution-test.sh
 
+      - name: Test launcher repo-identity decisions
+        run: bash tests/launcher-decision-test.sh
+
       - name: Check script syntax
         shell: bash
         run: |

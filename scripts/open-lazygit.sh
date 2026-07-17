@@ -6,10 +6,13 @@
 #   - a lazygit pane exists but isn't focused -> focus it
 #   - the focused pane IS the lazygit pane    -> close it (toggle off)
 #
-# Our pane is identified by its manifest title ("Git") plus a foreground
-# process check (`herdr pane process-info`) confirming lazygit actually runs
-# there — a user's own pane merely labeled "Git" is left alone. Any failure
-# (herdr CLI error, JSON parse error) degrades to OPEN.
+# Our pane is identified by its manifest title ("Git"), a foreground process
+# check (`herdr pane process-info`) confirming lazygit actually runs there,
+# and repo/worktree identity: only a pane whose `foreground_cwd` (fallback
+# `cwd`) resolves to the SAME git worktree as the launch target is reusable.
+# A user's own pane merely labeled "Git", or a lazygit pane for a different
+# repo/worktree, is left alone. Any failure (herdr CLI error, JSON parse
+# error, cwd/git resolution failure) degrades to OPEN.
 #
 # The pane's initial cwd comes from HERDR_PLUGIN_CONTEXT_JSON:
 # focused_pane_cwd, else workspace_cwd, else $HOME.
@@ -117,11 +120,12 @@ panes_json="$("$herdr_bin" pane list 2>/dev/null || true)"
 current_json="$("$herdr_bin" pane current 2>/dev/null || true)"
 
 decision="$(HERDR_PANES_JSON="$panes_json" HERDR_CURRENT_JSON="$current_json" \
-  HERDR_BIN="$herdr_bin" python3 - <<'PY' || echo OPEN
+  HERDR_BIN="$herdr_bin" HERDR_TARGET_DIR="$target_dir" python3 - <<'PY' || echo OPEN
 import json, os, re, subprocess, sys, time
 
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]*$")  # option-injection guard for ids
 herdr = os.environ.get("HERDR_BIN") or "herdr"
+target_dir = os.environ.get("HERDR_TARGET_DIR") or ""
 
 def emit(s):
     print(s)
@@ -148,6 +152,53 @@ def runs_lazygit(pane_id):
         pass
     return False
 
+def normalize_dir(path):
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        resolved = os.path.realpath(path)
+    except Exception:
+        return None
+    return resolved if os.path.isdir(resolved) else None
+
+def git_toplevel(path):
+    try:
+        r = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if r.returncode == 0:
+        return normalize_dir((r.stdout or "").strip())
+    msg = ((r.stderr or "") + "\n" + (r.stdout or "")).lower()
+    if "not a git repository" in msg:
+        return False
+    return None
+
+def resolve_identity(path):
+    resolved = normalize_dir(path)
+    if not resolved:
+        return None
+    top = git_toplevel(resolved)
+    if top is None:
+        return None
+    return {"dir": resolved, "git_top": top or None}
+
+def pane_cwd(pane):
+    for key in ("foreground_cwd", "cwd"):
+        value = pane.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+def same_identity(a, b):
+    if not a or not b:
+        return False
+    if a["git_top"] and b["git_top"]:
+        return a["git_top"] == b["git_top"]
+    return a["dir"] == b["dir"]
+
 candidates = [
     p for p in panes
     if isinstance(p, dict)
@@ -157,6 +208,17 @@ candidates = [
     and SAFE.match(p.get("pane_id") or "")
 ]
 
+target_identity = resolve_identity(target_dir)
+pane_identity_cache = {}
+
+def matches_target(pane):
+    if not target_identity:
+        return False
+    pane_id = pane.get("pane_id") or ""
+    if pane_id not in pane_identity_cache:
+        pane_identity_cache[pane_id] = resolve_identity(pane_cwd(pane))
+    return same_identity(target_identity, pane_identity_cache[pane_id])
+
 # A pane freshly created by a just-finished `plugin pane open` can exist while
 # lazygit has not started yet, so a "Git" candidate that fails the process
 # check is re-checked briefly before we conclude it is not ours (only costs
@@ -165,6 +227,7 @@ candidates = [
 attempts = 4 if candidates else 1
 for i in range(attempts):
     matches = [p for p in candidates if runs_lazygit(p["pane_id"])]
+    matches = [p for p in matches if matches_target(p)]
     if matches:
         # Prefer the focused match: with duplicates, first-match-wins would
         # FOCUS a sibling instead of toggling the focused pane closed.
