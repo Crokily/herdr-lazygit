@@ -52,6 +52,18 @@ command = "herdr-lazygit.open-tab"
 
 执行 `herdr server reload-config`。之后 `prefix+g` 的行为是：未打开 → 分屏打开；已打开但未聚焦 → 聚焦；已聚焦 → 关闭。
 
+### Herdr Remote
+
+使用 `herdr --remote` 连接时，Herdr 默认采用本地键位。当前 Herdr 版本生成本地键位配置时会有意忽略所有 `[[keys.command]]`，其中也包括 `type = "plugin_action"`。因此，即使本地机器的 `config.toml` 也配置了相同键位，上述启动键在默认 Remote 模式下仍不会生效。
+
+请先 detach，然后改为使用远程服务器的键位重新连接：
+
+```sh
+herdr --remote <host> --remote-keybindings server
+```
+
+连接命名 session 时照常添加 `--session <name>`。键位策略在 attach 时确定，因此 `herdr server reload-config` 无法改变已经连接的 Remote 客户端所使用的策略。详情参见 [Herdr 远程访问文档](https://herdr.dev/docs/persistence-remote/)。
+
 ## 日常工作流
 
 按 `prefix+g`，当前目录旁边打开一条 42 列的 git 侧栏；再按一次关闭。启动器是幂等的，不会开出第二个。

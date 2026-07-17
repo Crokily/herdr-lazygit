@@ -52,6 +52,18 @@ command = "herdr-lazygit.open-tab"
 
 Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
 
+### Herdr Remote
+
+When attaching with `herdr --remote`, Herdr uses local keybindings by default. In current Herdr releases, that local keybinding profile intentionally omits every `[[keys.command]]` entry, including `type = "plugin_action"`. As a result, the launcher bindings above do not work in the default remote mode—even if the same bindings are also present in the local machine's `config.toml`.
+
+Detach and reattach using the remote server's keybindings instead:
+
+```sh
+herdr --remote <host> --remote-keybindings server
+```
+
+Add `--session <name>` as usual when attaching to a named session. The keybinding policy is selected when attaching, so `herdr server reload-config` does not change it for an already attached remote client. See the [Herdr remote access documentation](https://herdr.dev/docs/persistence-remote/) for details.
+
 ## Daily workflow
 
 Press `prefix+g`. A 42-column git sidebar opens next to your current directory. Press it again and the sidebar closes; the launcher never opens a second copy.
