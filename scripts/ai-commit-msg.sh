@@ -35,6 +35,7 @@ BACKEND_ORDER="claude codex opencode gemini"   # auto detection order
 AI_CLAUDE_MODEL="${AI_CLAUDE_MODEL-haiku}"
 AI_CODEX_MODEL="${AI_CODEX_MODEL-}"   # empty = Codex default (no stable, broadly accepted cheap model ID; do not guess)
 AI_OPENCODE_MODEL="${AI_OPENCODE_MODEL-google/gemini-2.5-flash}"
+AI_GEMINI_MODEL="${AI_GEMINI_MODEL-gemini-2.5-flash}"
 
 CONFIG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 CONFIG_FILE="$CONFIG_DIR/ai-backend.conf"
@@ -203,7 +204,11 @@ gen_codex() {
 }
 
 gen_gemini() {
-  run_with_timeout gemini -p "$PROMPT"
+  if [ -n "$AI_GEMINI_MODEL" ]; then
+    run_with_timeout gemini -m "$AI_GEMINI_MODEL" -p "$PROMPT"
+  else
+    run_with_timeout gemini -p "$PROMPT"
+  fi
 }
 
 gen_custom() {

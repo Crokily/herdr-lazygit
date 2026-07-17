@@ -3,6 +3,27 @@
 Notable changes to the herdr-lazygit plugin. Versions track `version` in
 `herdr-plugin.toml`; the format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Top-level MIT `LICENSE` for the repository (`Copyright (c) 2026 Crokily`).
+- Explicit Gemini model pinning support through `AI_GEMINI_MODEL`, defaulting to
+  `gemini-2.5-flash` unless the variable is set to an empty string to defer to
+  the Gemini CLI default.
+- README and `README.zh-CN.md` AI data-disclosure sections explaining that
+  pressing `C` sends the staged diff (currently truncated to 8,000
+  characters) plus the plugin prompt text to the selected local AI CLI, which
+  then forwards it to the provider under the user's account; the plugin itself
+  has no telemetry.
+
+### Fixed
+
+- The README model-cost claim now states the real defaults: claude uses
+  `haiku`, opencode uses `google/gemini-2.5-flash`, gemini uses
+  `gemini-2.5-flash`, and codex uses the Codex CLI's configured default unless
+  `AI_CODEX_MODEL` is set.
+
 ## [0.2.0] - 2026-07-17
 
 ### Added

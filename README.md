@@ -39,7 +39,7 @@ All three keys are remappable from the settings pane. The mouse works throughout
 Press `;` from anywhere in lazygit. A settings pane (fzf-driven, keyboard and mouse) opens beside the sidebar:
 
 - **AI backend**: claude / codex / opencode / gemini. Default is auto-detection in that order;
-- **AI model**: set per backend. Defaults use each provider's cheap, fast tier (haiku for claude), so commit messages never run on an expensive default model;
+- **AI model**: set per backend. Defaults are `haiku` for claude, `google/gemini-2.5-flash` for opencode, `gemini-2.5-flash` for gemini, and the Codex CLI's configured default for codex. If you want codex pinned to a specific model, set `AI_CODEX_MODEL`;
 - **AI prompt**: opens the prompt file in `$EDITOR`. Edit it to change the language or format of generated messages;
 - **Keys**: remap C / U / ; by pressing the new key. Keys that collide with a lazygit built-in are rejected, and the conflicting binding is shown;
 - **Widths**: sidebar, expanded layout, and commit pane columns.
@@ -51,6 +51,12 @@ Changes take effect when the lazygit pane regains focus — lazygit hot-reloads 
 ## What AI commit requires
 
 One of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemini`. No API keys are needed; the plugin calls the CLI's non-interactive mode under your existing login. When generation fails, the commit pane shows a hint line starting with `(` that names the backend and the error; press any key to close. `Ctrl-C` cancels a running generation.
+
+### AI data disclosure
+
+Pressing `C` sends the staged diff plus the prompt text for this plugin to the selected AI CLI on this machine. The diff is currently truncated to the first 8,000 characters before it is passed to the CLI.
+
+That CLI then forwards the request to its provider's service under **your** account; that provider's billing, retention, and privacy policies apply. Nothing is sent at any other time. The plugin itself collects nothing and has no telemetry.
 
 ![The AI commit pane](docs/media/commit-pane.png)
 
@@ -187,3 +193,7 @@ lazygit-user.yml             # your lazygit overrides — always wins
 ```
 
 The design rationale — the three-verb model, the split between lazygit (git interactions) and herdr (window management), key-picking rules, and capability boundaries — is documented in [DESIGN.md](DESIGN.md).
+
+## License
+
+This repository is licensed under the [MIT License](LICENSE). The bundled lazygit/fzf runtime is covered separately in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

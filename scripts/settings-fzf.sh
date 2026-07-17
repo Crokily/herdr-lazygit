@@ -85,7 +85,7 @@ GEN_NOTE=""   # Result note from regen, appended to MSG
 load_confs() {
   AI_BACKEND="auto"; AI_CUSTOM_CMD=""
   AI_CLAUDE_MODEL="haiku"; AI_CODEX_MODEL=""
-  AI_OPENCODE_MODEL="google/gemini-2.5-flash"; AI_GEMINI_MODEL=""
+  AI_OPENCODE_MODEL="google/gemini-2.5-flash"; AI_GEMINI_MODEL="gemini-2.5-flash"
   KEY_COMMIT=""; KEY_ZOOM=""; KEY_SETTINGS=""
   SIDEBAR_COLS=""; EXPAND_COLS=""; COMMIT_COLS=""; SETTINGS_COLS=""
   LAYOUT_MODE="sidebar"

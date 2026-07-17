@@ -39,7 +39,7 @@
 在 lazygit 任意面板按 `;`,侧栏旁边打开设置页(fzf 驱动,键盘鼠标均可):
 
 - **AI 后端**:claude / codex / opencode / gemini,默认按此顺序自动探测第一个已安装的;
-- **AI 模型**:按后端分别设置。默认使用各家便宜快速的档位(claude 用 haiku),不会用昂贵的默认模型生成 commit message;
+- **AI 模型**:按后端分别设置。默认值分别是 claude 用 `haiku`、opencode 用 `google/gemini-2.5-flash`、gemini 用 `gemini-2.5-flash`、codex 用 Codex CLI 当前配置的默认模型。若你想把 codex 固定到某个模型,请设置 `AI_CODEX_MODEL`;
 - **AI Prompt**:用 `$EDITOR` 打开 prompt 文件,修改它可以改变生成 message 的语言和格式;
 - **键位**:按下新键即可重映射 C / U / ;。与 lazygit 内置键冲突时会被拒绝,并显示被哪个绑定占用;
 - **宽度**:侧栏、展开布局、commit pane 的列宽。
@@ -51,6 +51,12 @@
 ## AI 提交的前置条件
 
 安装并登录以下任意一个 CLI:`claude`、`codex`、`opencode`、`gemini`。不需要配置 API key,插件调用 CLI 的非交互模式,使用你已有的登录态。生成失败时 commit pane 显示以 `(` 开头的提示行,包含后端名和错误摘要,按任意键关闭;生成过程中 `Ctrl-C` 取消。
+
+### AI 数据披露
+
+按下 `C` 时,插件会把当前已暂存的 diff 和本插件的 prompt 文本发送给这台机器上选中的 AI CLI。传给 CLI 前,diff 目前会截断到前 8,000 个字符。
+
+随后由该 CLI 以 **你的** 账号把请求转发到对应服务商;计费、数据保留和隐私政策都以该服务商为准。除此之外不会在其他时刻发送任何内容。插件本身不收集任何数据,也没有遥测。
 
 ![AI commit pane](docs/media/commit-pane.png)
 
@@ -187,3 +193,7 @@ lazygit-user.yml             # 你的 lazygit 覆盖层——永远赢
 ```
 
 设计文档 [DESIGN.md](DESIGN.md) 记录了完整的设计依据:三动词模型、lazygit 负责 git 交互 / herdr 负责窗口管理的分工、选键规则、以及能力边界。
+
+## License
+
+本仓库使用 [MIT License](LICENSE)。捆绑的 lazygit/fzf runtime 许可证单独记录在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
