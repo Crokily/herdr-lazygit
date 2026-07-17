@@ -1,5 +1,9 @@
 # herdr-lazygit
 
+![herdr-lazygit 演示](docs/media/demo.gif)
+
+<sub>演示 GIF 由 Fable 5 使用 [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill 自动录制。</sub>
+
 [English](README.md)
 
 一个 [herdr](https://herdr.dev) 插件：在窄侧栏 pane 里运行 [lazygit](https://github.com/jesseduffield/lazygit)，内置 AI 生成 commit message。一个键打开侧栏，一个键展开成完整 lazygit 布局，一个键用 AI 写好的 message 提交。
@@ -39,10 +43,6 @@ command = "herdr-lazygit.open-tab"
 ```
 
 执行 `herdr server reload-config`。之后 `prefix+g` 的行为是：未打开 → 分屏打开；已打开但未聚焦 → 聚焦；已聚焦 → 关闭。
-
-![herdr-lazygit 演示](docs/media/demo.gif)
-
-<sub>演示 GIF 由 Fable 5 使用 [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill 自动录制。</sub>
 
 ## 日常工作流
 

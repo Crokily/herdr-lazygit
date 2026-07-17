@@ -1,5 +1,9 @@
 # herdr-lazygit
 
+![herdr-lazygit demo](docs/media/demo.gif)
+
+<sub>Demo recorded automatically by Fable 5 with the [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill.</sub>
+
 [中文文档](README.zh-CN.md)
 
 A [herdr](https://herdr.dev) plugin that runs [lazygit](https://github.com/jesseduffield/lazygit) in a narrow sidebar pane, with AI commit message generation. Press one key to open the sidebar, one key to expand it into the full lazygit layout, and one key to commit with an AI-written message.
@@ -39,10 +43,6 @@ command = "herdr-lazygit.open-tab"
 ```
 
 Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
-
-![herdr-lazygit demo](docs/media/demo.gif)
-
-<sub>Demo recorded automatically by Fable 5 with the [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill.</sub>
 
 ## Daily workflow
 
