@@ -1,5 +1,10 @@
 # herdr-lazygit
 
+[![CI](https://github.com/Crokily/herdr-lazygit/actions/workflows/runtime-tests.yml/badge.svg)](https://github.com/Crokily/herdr-lazygit/actions/workflows/runtime-tests.yml)
+[![Release](https://img.shields.io/github/v/release/Crokily/herdr-lazygit)](https://github.com/Crokily/herdr-lazygit/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+
 ![herdr-lazygit 演示](docs/media/demo.gif)
 
 <sub>演示 GIF 由 Fable 5 使用 [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill 自动录制。</sub>
@@ -26,6 +31,9 @@ AI commit message 所使用的 AI CLI 与插件安装是两回事。Git 侧栏�
 
 ```sh
 herdr plugin install crokily/herdr-lazygit
+
+# 或固定安装某个发布版本:
+herdr plugin install crokily/herdr-lazygit --ref v0.3.0
 ```
 
 在当前生效的 herdr `config.toml` 中添加启动键位：

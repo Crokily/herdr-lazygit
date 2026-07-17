@@ -128,3 +128,8 @@ Initial release.
   `free-keys.py` occupancy analysis so plugin keys never shadow lazygit
   built-ins; key conflicts are rejected at settings time.
 - English and Chinese READMEs, DESIGN.md, and an automated demo GIF.
+
+[0.3.0]: https://github.com/Crokily/herdr-lazygit/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Crokily/herdr-lazygit/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/Crokily/herdr-lazygit/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Crokily/herdr-lazygit/releases/tag/v0.1.0

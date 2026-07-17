@@ -1,5 +1,10 @@
 # herdr-lazygit
 
+[![CI](https://github.com/Crokily/herdr-lazygit/actions/workflows/runtime-tests.yml/badge.svg)](https://github.com/Crokily/herdr-lazygit/actions/workflows/runtime-tests.yml)
+[![Release](https://img.shields.io/github/v/release/Crokily/herdr-lazygit)](https://github.com/Crokily/herdr-lazygit/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+
 ![herdr-lazygit demo](docs/media/demo.gif)
 
 <sub>Demo recorded automatically by Fable 5 with the [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill.</sub>
@@ -26,6 +31,9 @@ Requires herdr >= 0.7.0 plus `bash`, `git`, and Python >= 3.7 (`python3`) on `PA
 
 ```sh
 herdr plugin install crokily/herdr-lazygit
+
+# or pin a released version:
+herdr plugin install crokily/herdr-lazygit --ref v0.3.0
 ```
 
 Add the launcher keybindings to your active herdr `config.toml`:
