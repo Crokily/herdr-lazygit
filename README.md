@@ -58,6 +58,35 @@ One of these CLIs installed and logged in: `claude`, `codex`, `opencode`, `gemin
 
 Requires herdr >= 0.7.0 plus `bash`, `git`, and Python >= 3.7 (`python3`) on `PATH`. During a GitHub install, the plugin downloads pinned private copies of lazygit 0.63.0 and fzf 0.74.0, verifies repository-pinned SHA-256 digests, and stores them under its managed `bin/` directory. It never invokes Homebrew, a system package manager, or `sudo`. The build also needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`.
 
+### Why a private lazygit?
+
+The plugin generates lazygit configuration — customCommands, keybindings, layout — tested against exactly lazygit 0.63.0, and its settings menu relies on fzf 0.74.0 features. Pinning private copies means the same plugin version behaves the same on every machine, and users without lazygit get a working pane with no package-manager side effects. The private binaries never enter `PATH` and never conflict with a Homebrew or distro lazygit.
+
+### Your existing lazygit config
+
+The pane loads your own lazygit config file (from the directory `lazygit --print-config-dir` reports) as the base layer, so your theme and settings apply inside the pane. The plugin's layers merge over it — keys the plugin owns still win, and `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml` keeps the final say. Set `INHERIT_USER_CONFIG=0` in `$HERDR_PLUGIN_CONFIG_DIR/panel.conf` to opt out. If your personal config was written for a newer lazygit and the pinned one rejects it, the pane stays open and shows the error instead of closing silently.
+
+### Using your own binaries
+
+Absolute paths in `$HERDR_PLUGIN_CONFIG_DIR/panel.conf` bypass the private runtime:
+
+```sh
+RUNTIME_LAZYGIT_BIN='/opt/homebrew/bin/lazygit'
+RUNTIME_FZF_BIN='/opt/homebrew/bin/fzf'
+```
+
+A version other than the pinned one prints a warning and is unsupported — generated keybindings and config may misbehave.
+
+### Installing behind a firewall
+
+The runtime downloads from GitHub releases. If the build cannot reach GitHub, run the installer manually with mirror overrides (paths mirror the upstream `releases/download` layout); repository-pinned SHA-256 digests still verify whatever the mirror serves:
+
+```sh
+HERDR_LAZYGIT_LAZYGIT_BASE_URL='https://your-mirror/jesseduffield/lazygit/releases/download' \
+HERDR_LAZYGIT_FZF_BASE_URL='https://your-mirror/junegunn/fzf/releases/download' \
+  /bin/sh scripts/install-runtime.sh
+```
+
 ```sh
 herdr plugin install crokily/herdr-lazygit
 

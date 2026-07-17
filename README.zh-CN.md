@@ -58,6 +58,35 @@
 
 要求 herdr >= 0.7.0,并确保 `bash`、`git`、Python >= 3.7(`python3`)在 `PATH` 上。通过 GitHub 安装时,插件会下载固定版本的私有 lazygit 0.63.0 与 fzf 0.74.0,用仓库内固定的 SHA-256 校验值验证后存入 Herdr 管理的插件 `bin/` 目录。安装过程不会调用 Homebrew、系统包管理器或 `sudo`。构建阶段还需要 `curl` 或 `wget`、`tar`,以及 `sha256sum` 或 `shasum`。
 
+### 为什么自带一份 lazygit?
+
+插件生成的 lazygit 配置(customCommands、键位、布局)是针对 lazygit 0.63.0 精确测试的,settings 菜单依赖 fzf 0.74.0 的特性。钉住私有副本意味着同一插件版本在每台机器上的行为一致,没装过 lazygit 的用户也能零副作用地获得可用的面板。私有二进制不进入 `PATH`,与 Homebrew 或发行版安装的 lazygit 互不干扰。
+
+### 你已有的 lazygit 配置
+
+面板会把你自己的 lazygit 配置文件(目录由 `lazygit --print-config-dir` 报告)作为最底层加载,你的主题和设置在面板内继续生效。插件的配置层合并在其上——插件占用的键仍然胜出,`$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml` 拥有最终决定权。在 `$HERDR_PLUGIN_CONFIG_DIR/panel.conf` 中设置 `INHERIT_USER_CONFIG=0` 可关闭继承。如果你的个人配置面向更新版 lazygit、被钉住的版本拒绝,面板会保持打开并显示错误,而不是无声关闭。
+
+### 使用你自己的二进制
+
+在 `$HERDR_PLUGIN_CONFIG_DIR/panel.conf` 中写入绝对路径即可绕过私有 runtime:
+
+```sh
+RUNTIME_LAZYGIT_BIN='/opt/homebrew/bin/lazygit'
+RUNTIME_FZF_BIN='/opt/homebrew/bin/fzf'
+```
+
+版本与钉住版本不一致时会打印警告,且不在支持范围内——生成的键位和配置可能行为异常。
+
+### 网络受限时安装
+
+runtime 从 GitHub releases 下载。如果构建无法访问 GitHub,请手动带镜像变量运行安装脚本(路径沿用上游 `releases/download` 布局);仓库内固定的 SHA-256 校验值仍会验证镜像返回的内容:
+
+```sh
+HERDR_LAZYGIT_LAZYGIT_BASE_URL='https://your-mirror/jesseduffield/lazygit/releases/download' \
+HERDR_LAZYGIT_FZF_BASE_URL='https://your-mirror/junegunn/fzf/releases/download' \
+  /bin/sh scripts/install-runtime.sh
+```
+
 ```sh
 herdr plugin install crokily/herdr-lazygit
 

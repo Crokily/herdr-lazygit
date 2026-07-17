@@ -23,6 +23,17 @@ set -euo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
+# --- runtime precheck --------------------------------------------------------
+# Fail fast — and visibly in `herdr plugin log list`, which captures action
+# stderr — when the runtime is missing or a panel.conf override points at a
+# broken binary. Without this the pane opens and dies instantly with its error
+# unreadable.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC1091
+. "$script_dir/runtime-env.sh"
+herdr_lazygit_require_runtime lazygit || exit 1
+herdr_lazygit_version_notice || true
+
 # --- serialize concurrent launcher runs -------------------------------------
 # `herdr plugin action invoke` is fire-and-forget (returns while the action is
 # still "running"), so even two back-to-back invokes (key auto-repeat, double

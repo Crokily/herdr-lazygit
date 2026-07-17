@@ -6,7 +6,7 @@
 
 id = "herdr-lazygit"
 name = "herdr-lazygit"
-version = "0.1.1"
+version = "0.2.0"
 description = "lazygit in a herdr split pane, with AI-assisted commit messages via custom commands."
 min_herdr_version = "0.7.0"
 platforms = ["linux", "macos"]
