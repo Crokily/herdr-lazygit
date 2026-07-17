@@ -19,6 +19,8 @@ herdr_bin="${HERDR_BIN_PATH:-herdr}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 helper="$script_dir/layout-helper.py"
 commit_sh="$script_dir/ai-commit-pane.sh"
+# shellcheck disable=SC1091
+. "$script_dir/layout-layer.sh"
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "open-ai-commit-pane.sh: not inside a git repository" >&2
   exit 1
@@ -32,9 +34,9 @@ shq() { python3 -c 'import shlex, sys; sys.stdout.write(shlex.quote(sys.argv[1])
 SIDEBAR_COLS=42
 EXPAND_COLS=110
 COMMIT_COLS=70
-LAYOUT_MODE=sidebar
 config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 panel_conf="$config_dir/panel.conf"
+layout_file="${HERDR_LAZYGIT_LAYOUT_FILE:-}"
 # shellcheck disable=SC1090
 [ -f "$panel_conf" ] && . "$panel_conf"
 case "$SIDEBAR_COLS" in *[!0-9]*|'') SIDEBAR_COLS=42 ;; esac
@@ -43,6 +45,7 @@ case "$COMMIT_COLS" in *[!0-9]*|'') COMMIT_COLS=70 ;; esac
 [ "$SIDEBAR_COLS" -ge 20 ] 2>/dev/null || SIDEBAR_COLS=42
 [ "$EXPAND_COLS" -ge 80 ] 2>/dev/null || EXPAND_COLS=80
 [ "$COMMIT_COLS" -ge 40 ] 2>/dev/null || COMMIT_COLS=70
+LAYOUT_MODE="$(herdr_lazygit_read_layout_mode "$layout_file")"
 
 # Temporarily set lazygit to sidebar width while the AI pane is visible; restore
 # the mode active at invocation after it closes.

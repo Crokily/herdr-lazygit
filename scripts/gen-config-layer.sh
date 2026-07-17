@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # gen-config-layer.sh — generate the intermediate generated.yml layer in the
-# three-layer configuration model.
+# layered configuration model.
 #
 # Three configuration layers (see DESIGN.md):
 #   lazygit-config.yml (bundled with the plugin)
 #     → $HERDR_PLUGIN_CONFIG_DIR/generated.yml (generated here; do not edit)
-#       → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml (user-authored, always last
-#         and therefore always wins)
+#       → $HERDR_PLUGIN_CONFIG_DIR/layout-*.yml (per-pane layout layer written
+#         by run-lazygit.sh / toggle-expand.sh)
+#         → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml (user-authored, always
+#           last and therefore always wins)
 #
-# Inputs: $HERDR_PLUGIN_CONFIG_DIR/keys.conf (written by Settings and
-# shell-sourceable) plus LAYOUT_MODE from panel.conf (sidebar|expanded).
-# Missing files/values use defaults:
+# Input: $HERDR_PLUGIN_CONFIG_DIR/keys.conf (written by Settings and
+# shell-sourceable). Missing files/values use defaults:
 #   KEY_COMMIT=C   KEY_ZOOM=U   KEY_SETTINGS=';'
 # (U and ';' come from scripts/free-keys.py's free-key analysis of built-in
 # lazygit 0.63.0 bindings: Z is occupied by universal.redo, <c-s> by
@@ -18,7 +19,6 @@
 # are unused in every panel.)
 #
 # Output: generated.yml containing
-#   - gui: sidebar/expanded lazygit layouts selected by LAYOUT_MODE
 #   - customCommands: KEY_COMMIT (opens AI commit pane), KEY_ZOOM (global,
 #     toggles layout), and KEY_SETTINGS (global, calls open-settings-pane.sh)
 #   - keybinding: conditional <disabled> compatibility for old handwritten
@@ -44,7 +44,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 config_dir="${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-lazygit}"
 mkdir -p "$config_dir"
 keys_conf="$config_dir/keys.conf"
-panel_conf="$config_dir/panel.conf"
 out="$config_dir/generated.yml"
 
 # Default keys for the plugin's three verbs (DEF_KEY_* in settings-fzf.sh must
@@ -67,19 +66,6 @@ fi
 [ -n "$k_commit" ]   || k_commit="$def_commit"
 [ -n "$k_zoom" ]     || k_zoom="$def_zoom"
 [ -n "$k_settings" ] || k_settings="$def_settings"
-
-# --- Read layout state from panel.conf (invalid values fall back to sidebar) -
-layout_mode=""
-if [ -f "$panel_conf" ]; then
-  layout_mode="$(
-    ( . "$panel_conf" >/dev/null 2>&1 || exit 0
-      printf '%s' "${LAYOUT_MODE:-}" ) 2>/dev/null
-  )"
-fi
-case "$layout_mode" in
-  sidebar|expanded) ;;
-  *) layout_mode="sidebar" ;;
-esac
 
 # --- Validate key syntax: warn and restore defaults for invalid values; never
 #     write invalid values to generated.yml ----------------------------------
@@ -114,7 +100,7 @@ valid_key "$k_settings" || { warn_bad_key KEY_SETTINGS "$k_settings" "$def_setti
 # The lazygit version participates in the marker because built-in key conflicts
 # can change between releases. Script/runtime mtimes also invalidate a persisted
 # generated layer after a plugin reinstall or local runtime rebuild.
-marker="# keys: $k_commit $k_zoom $k_settings | layout: $layout_mode | lazygit: $LAZYGIT_VERSION"
+marker="# keys: $k_commit $k_zoom $k_settings | lazygit: $LAZYGIT_VERSION"
 if [ -f "$out" ] \
    && grep -qxF "$marker" "$out" 2>/dev/null \
    && [ ! "$self" -nt "$out" ] \
@@ -130,11 +116,6 @@ yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
 qc="$(yaml_quote "$k_commit")"
 qz="$(yaml_quote "$k_zoom")"
 qs="$(yaml_quote "$k_settings")"
-
-case "$layout_mode" in
-  expanded) side_panel_width="0.3333" ;;
-  *)        side_panel_width="0.99" ;;
-esac
 
 # --- Panel-level KEY_SETTINGS conflicts → <disabled> ------------------------
 # free-keys.py check outputs "<ctx>\t<section>.<action>". Ignore the universal
@@ -170,18 +151,15 @@ tmp="$out.tmp.$$"
 EOF
   # Marker line: record generation inputs so the cache detects deleted key
   # overrides and lazygit runtime upgrades.
-  printf '# keys: %s %s %s | layout: %s | lazygit: %s\n' \
-    "$k_commit" "$k_zoom" "$k_settings" "$layout_mode" "$LAZYGIT_VERSION"
+  printf '# keys: %s %s %s | lazygit: %s\n' \
+    "$k_commit" "$k_zoom" "$k_settings" "$LAZYGIT_VERSION"
   cat <<'EOF'
 #
 # Change keys through Settings (press the Settings key in lazygit), or edit
 # keys.conf and reopen lazygit. Override any setting here in lazygit-user.yml,
 # which loads after this file and always wins.
 EOF
-  printf 'gui:\n  sidePanelWidth: %s\n' "$side_panel_width"
   cat <<'EOF'
-  expandFocusedSidePanel: true
-  portraitMode: never
 
 customCommands:
 EOF

@@ -35,6 +35,15 @@ jobs:
       - name: Test runtime resolution and config layering
         run: bash tests/runtime-resolution-test.sh
 
+      - name: Test per-pane layout isolation
+        run: bash tests/layout-state-isolation-test.sh
+
+      - name: Test launcher repo-identity decisions
+        run: bash tests/launcher-decision-test.sh
+
+      - name: Test AI diff sampling
+        run: bash tests/ai-diff-sampling-test.sh
+
       - name: Check script syntax
         shell: bash
         run: |

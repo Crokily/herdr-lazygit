@@ -89,7 +89,7 @@ chmod +x "$standalone_root/bin/lazygit"
 
 # ---------------------------------------------------------------------------
 # Rebuilding the pinned lazygit binary must invalidate generated.yml even when
-# keys and layout stay unchanged, because built-in key conflicts may differ.
+# keys stay unchanged, because built-in key conflicts may differ.
 # ---------------------------------------------------------------------------
 runtime_root="$tmp/runtime-root"
 runtime_bin="$runtime_root/bin"

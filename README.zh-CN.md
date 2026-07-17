@@ -39,7 +39,7 @@
 在 lazygit 任意面板按 `;`,侧栏旁边打开设置页(fzf 驱动,键盘鼠标均可):
 
 - **AI 后端**:claude / codex / opencode / gemini,默认按此顺序自动探测第一个已安装的;
-- **AI 模型**:按后端分别设置。默认使用各家便宜快速的档位(claude 用 haiku),不会用昂贵的默认模型生成 commit message;
+- **AI 模型**:按后端分别设置。默认值分别是 claude 用 `haiku`、opencode 用 `google/gemini-2.5-flash`、gemini 用 `gemini-2.5-flash`、codex 用 Codex CLI 当前配置的默认模型。若你想把 codex 固定到某个模型,请设置 `AI_CODEX_MODEL`;
 - **AI Prompt**:用 `$EDITOR` 打开 prompt 文件,修改它可以改变生成 message 的语言和格式;
 - **键位**:按下新键即可重映射 C / U / ;。与 lazygit 内置键冲突时会被拒绝,并显示被哪个绑定占用;
 - **宽度**:侧栏、展开布局、commit pane 的列宽。
@@ -51,6 +51,12 @@
 ## AI 提交的前置条件
 
 安装并登录以下任意一个 CLI:`claude`、`codex`、`opencode`、`gemini`。不需要配置 API key,插件调用 CLI 的非交互模式,使用你已有的登录态。生成失败时 commit pane 显示以 `(` 开头的提示行,包含后端名和错误摘要,按任意键关闭;生成过程中 `Ctrl-C` 取消。
+
+### AI 数据披露
+
+按下 `C` 时,插件会把当前已暂存的 diff 和本插件的 prompt 文本发送给这台机器上选中的 AI CLI。如果 staged diff 没超过配置的 `DIFF_MAX_CHARS` 预算(默认 8,000),就原样发送;超过时则发送结构化采样:先附上一个按预算裁剪的 per-file 概览(能放下的每个文件都会带状态与 `+/-` 行数,省略时会追加提示行),再附上受预算限制的 patch 样本。
+
+随后由该 CLI 以 **你的** 账号把请求转发到对应服务商;计费、数据保留和隐私政策都以该服务商为准。除此之外不会在其他时刻发送任何内容。插件本身不收集任何数据,也没有遥测。
 
 ![AI commit pane](docs/media/commit-pane.png)
 
@@ -119,7 +125,7 @@ command = "herdr-lazygit.open-tab"
 ### 键位细节
 
 - `C` 只读取 **staged** 内容——先 stage 再按。它覆盖了 files 面板内置的「用 git editor 提交」键位;如果需要该功能,在 `lazygit-user.yml` 里重新绑定。每个 tab 同时只有一个 `GitCommit` pane。
-- `U` 是全局键位,在 `sidebar` 和 `expanded` 之间切换 `LAYOUT_MODE`。展开宽度默认 110 列,上限为 tab 总宽减 20。重新打开插件时总是从侧栏模式开始。
+- `U` 是全局键位,切换当前 pane 自己的布局层: `sidebar` 与 `expanded`。展开宽度默认 110 列,上限为 tab 总宽减 20。每个新 pane 都从侧栏模式开始,其他 pane 保持自己的模式不变。
 - `U` 和 `;` 是对 lazygit 0.63.0 全部内置键位做空闲键分析得出的默认值:候选 `Z` 被 `universal.redo` 占用;`Ctrl+S` 和 `O` 分别与过滤菜单、PR 菜单冲突;`U` 和 `;` 在所有面板均无绑定(完整占用矩阵见 [DESIGN.md](DESIGN.md) 附录 A)。选键规则:插件键位不遮蔽 lazygit 常用内置键。`v`(范围选择)和 `V`(cherry-pick 粘贴)因此保持原生。
 - 键位持久化在 `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`。
 
@@ -137,15 +143,16 @@ AI_CUSTOM_CMD=""
 
 设置页里的 `detected` 表示 CLI 已安装,不保证已登录或有使用资格。失败提示会包含后端名和一行 stderr 摘要。
 
-### 三层配置
+### 配置层
 
-插件通过 `LG_CONFIG_FILE` 加载三层 lazygit 配置,越靠后优先级越高:
+插件通过 `LG_CONFIG_FILE` 加载四层由插件管理的 lazygit 配置,越靠后优先级越高:
 
 1. 插件捆绑的基础层 `lazygit-config.yml`(出厂设置——请勿修改,插件更新会覆盖)
-2. 生成层 `$HERDR_PLUGIN_CONFIG_DIR/generated.yml`(由键位与布局模式生成——机器生成,勿手改)
-3. 用户覆盖层 `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml`(首次启动自动创建;永远排最后,永远赢)
+2. 全局生成层 `$HERDR_PLUGIN_CONFIG_DIR/generated.yml`(由键位/customCommands 生成——机器生成,勿手改)
+3. 每个 pane 自己的布局层 `$HERDR_PLUGIN_CONFIG_DIR/layout-<pid>-<epoch>.yml`(pane 启动时创建,按 `U` 时改写;只保存这个 pane 的 sidebar/expanded 状态)
+4. 用户覆盖层 `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml`(首次启动自动创建;永远排最后,永远赢)
 
-普通字段按字段覆盖;`customCommands` 跨层累加,同 key + context 时靠后的文件赢,所以覆盖层可以整条替换插件的任何命令。生成层负责随模式变化的 `sidePanelWidth`,并固定 `expandFocusedSidePanel: true` 和 `portraitMode: never`;基础层开启鼠标支持、关闭随机 tip。两层都不设置 Nerd Font(需要图标时在覆盖层加 `gui.nerdFontsVersion: "3"`)。
+普通字段按字段覆盖;`customCommands` 跨层累加,同 key + context 时靠后的文件赢,所以覆盖层可以整条替换插件的任何命令。每个 pane 的布局层负责随模式变化的 `sidePanelWidth`,并固定 `expandFocusedSidePanel: true` 和 `portraitMode: never`;基础层开启鼠标支持、关闭随机 tip。两层都不设置 Nerd Font(需要图标时在覆盖层加 `gui.nerdFontsVersion: "3"`)。
 
 重映射插件键位:用设置页(存储在 `keys.conf`)。重映射 lazygit 内置键位:在 `lazygit-user.yml` 里加 `keybinding` 段。
 
@@ -154,7 +161,7 @@ AI_CUSTOM_CMD=""
 ```
 herdr-plugin.toml            # 插件 manifest
 lazygit-config.yml           # 捆绑的基础配置(出厂层)
-DESIGN.md                    # 设计文档:三动词模型、选键规则、三层配置
+DESIGN.md                    # 设计文档:三动词模型、选键规则、配置层
 THIRD_PARTY_NOTICES.md       # 下载的 lazygit/fzf 二进制许可证
 bin/                         # 构建生成的私有 lazygit + fzf runtime(不提交)
 scripts/
@@ -171,6 +178,7 @@ scripts/
   open-settings-pane.sh      # Settings handler:打开设置 pane
   settings-fzf.sh            # 设置 pane 里的 fzf 循环菜单
   gen-config-layer.sh        # keys.conf -> generated.yml(机器生成层)
+  layout-layer.sh            # 每个 pane 的布局层读写辅助
   free-keys.py               # 键位占用分析 / 冲突校验
   layout-helper.py           # 经 herdr socket 的绝对 pane 几何
 ```
@@ -179,11 +187,16 @@ scripts/
 
 ```
 keys.conf                    # 插件键位:KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS
-panel.conf                   # 各 pane 宽度 + LAYOUT_MODE(sidebar/expanded)
+panel.conf                   # 全局 pane 宽度 + 可选的 INHERIT_USER_CONFIG / RUNTIME_* 覆盖
 ai-backend.conf              # AI 后端 / 各后端模型
 prompt.txt                   # 自定义 AI commit prompt
-generated.yml                # 机器生成的 lazygit 配置层——勿手改
+generated.yml                # 机器生成的全局 lazygit 配置层——勿手改
+layout-<pid>-<epoch>.yml     # 机器生成的每-pane 布局层——勿手改
 lazygit-user.yml             # 你的 lazygit 覆盖层——永远赢
 ```
 
 设计文档 [DESIGN.md](DESIGN.md) 记录了完整的设计依据:三动词模型、lazygit 负责 git 交互 / herdr 负责窗口管理的分工、选键规则、以及能力边界。
+
+## License
+
+本仓库使用 [MIT License](LICENSE)。捆绑的 lazygit/fzf runtime 许可证单独记录在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

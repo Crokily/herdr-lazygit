@@ -6,10 +6,13 @@
 #   - a lazygit pane exists but isn't focused -> focus it
 #   - the focused pane IS the lazygit pane    -> close it (toggle off)
 #
-# Our pane is identified by its manifest title ("Git") plus a foreground
-# process check (`herdr pane process-info`) confirming lazygit actually runs
-# there — a user's own pane merely labeled "Git" is left alone. Any failure
-# (herdr CLI error, JSON parse error) degrades to OPEN.
+# Our pane is identified by its manifest title ("Git"), a foreground process
+# check (`herdr pane process-info`) confirming lazygit actually runs there,
+# and path identity: only a pane whose `foreground_cwd`/`cwd` candidates
+# resolve in order to the SAME git worktree, bare repo, or non-git directory
+# as the launch target is reusable. A user's own pane merely labeled "Git", or
+# a lazygit pane for a different target, is left alone. Any failure (herdr CLI
+# error, JSON parse error, cwd/git resolution failure) degrades to OPEN.
 #
 # The pane's initial cwd comes from HERDR_PLUGIN_CONTEXT_JSON:
 # focused_pane_cwd, else workspace_cwd, else $HOME.
@@ -117,11 +120,12 @@ panes_json="$("$herdr_bin" pane list 2>/dev/null || true)"
 current_json="$("$herdr_bin" pane current 2>/dev/null || true)"
 
 decision="$(HERDR_PANES_JSON="$panes_json" HERDR_CURRENT_JSON="$current_json" \
-  HERDR_BIN="$herdr_bin" python3 - <<'PY' || echo OPEN
+  HERDR_BIN="$herdr_bin" HERDR_TARGET_DIR="$target_dir" python3 - <<'PY' || echo OPEN
 import json, os, re, subprocess, sys, time
 
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]*$")  # option-injection guard for ids
 herdr = os.environ.get("HERDR_BIN") or "herdr"
+target_dir = os.environ.get("HERDR_TARGET_DIR") or ""
 
 def emit(s):
     print(s)
@@ -148,6 +152,60 @@ def runs_lazygit(pane_id):
         pass
     return False
 
+def normalize_dir(path):
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        resolved = os.path.realpath(path)
+    except Exception:
+        return None
+    return resolved if os.path.isdir(resolved) else None
+
+def resolve_identity(path):
+    resolved = normalize_dir(path)
+    if not resolved:
+        return None
+    try:
+        top = subprocess.run(
+            ["git", "-C", resolved, "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if top.returncode == 0:
+        top_dir = normalize_dir((top.stdout or "").strip())
+        if top_dir:
+            return {"kind": "worktree", "value": top_dir}
+        return None
+    try:
+        git_dir = subprocess.run(
+            ["git", "-C", resolved, "rev-parse", "--absolute-git-dir"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if git_dir.returncode == 0:
+        bare_dir = normalize_dir((git_dir.stdout or "").strip())
+        if bare_dir:
+            return {"kind": "bare", "value": bare_dir}
+        return None
+    return {"kind": "dir", "value": resolved}
+
+def resolve_pane_identity(pane):
+    for key in ("foreground_cwd", "cwd"):
+        value = pane.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        identity = resolve_identity(value)
+        if identity:
+            return identity
+    return None
+
+def same_identity(a, b):
+    if not a or not b:
+        return False
+    return a["kind"] == b["kind"] and a["value"] == b["value"]
+
 candidates = [
     p for p in panes
     if isinstance(p, dict)
@@ -157,6 +215,17 @@ candidates = [
     and SAFE.match(p.get("pane_id") or "")
 ]
 
+target_identity = resolve_identity(target_dir)
+pane_identity_cache = {}
+
+def matches_target(pane):
+    if not target_identity:
+        return False
+    pane_id = pane.get("pane_id") or ""
+    if pane_id not in pane_identity_cache:
+        pane_identity_cache[pane_id] = resolve_pane_identity(pane)
+    return same_identity(target_identity, pane_identity_cache[pane_id])
+
 # A pane freshly created by a just-finished `plugin pane open` can exist while
 # lazygit has not started yet, so a "Git" candidate that fails the process
 # check is re-checked briefly before we conclude it is not ours (only costs
@@ -165,6 +234,7 @@ candidates = [
 attempts = 4 if candidates else 1
 for i in range(attempts):
     matches = [p for p in candidates if runs_lazygit(p["pane_id"])]
+    matches = [p for p in matches if matches_target(p)]
     if matches:
         # Prefer the focused match: with duplicates, first-match-wins would
         # FOCUS a sibling instead of toggling the focused pane closed.

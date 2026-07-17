@@ -33,7 +33,7 @@ For every new feature, ask first: which verb does it belong to? If it belongs to
 | External interface | `customCommands` + configuration hot reload on focus-in | `pane split/run/close/send-text` + direct socket access through `layout-helper.py` |
 | What we consume | The Commit entry point in the files context and the global Expand / Settings entry points | `place-diff` / `set-width` / `set-region-width` (absolute column widths) |
 
-There are two normal layouts, with their state stored in `panel.conf` as `LAYOUT_MODE`:
+There are two normal layouts. Their state is pane-local: `run-lazygit.sh` creates a dedicated `layout-<pid>-<epoch>.yml` layer for each lazygit pane, seeded to `sidebar`, and `toggle-expand.sh` rewrites only that file:
 
 ```
 sidebar                                  expanded
@@ -44,9 +44,10 @@ sidebar                                  expanded
 ```
 
 - Sidebar mode forces `sidePanelWidth: 0.99`, squeezing lazygit panels 1–5 into a single column. Expanded mode restores `0.3333`, making the native main view and every native interaction visible again. Both modes fix `portraitMode: never` to prevent abrupt automatic layout changes in tall panes.
-- `U` updates the state and regenerates the GUI configuration first, then calls `set-width`, and finally injects CSI focus-in into lazygit. This hot-reloads both the layout and keybindings within the same keypress.
+- `U` rewrites the pane-local layout layer first, then calls `set-width`, and finally injects CSI focus-in into lazygit. This hot-reloads the new layout within the same keypress without touching any other pane's state.
 - AI Commit / Settings remain temporary wide panes to the right of the sidebar. While one is visible, lazygit is temporarily set to `SIDEBAR_COLS`. Before it exits, it restores the sidebar/expanded width that was active when it opened; `exit` then closes the pane automatically.
 - Only one pane of each type may exist at a time. Any existing pane is found by label and closed first: `GitCommit` / `GitSettings`.
+- The `open` / `open-tab` launchers reuse only within the current workspace and only when the candidate pane's `foreground_cwd` (fallback `cwd`) resolves to the same git worktree as the launch target (`git rev-parse --show-toplevel` on both sides). Different repositories, different worktrees of the same repository, or any cwd/git-resolution failure all degrade to OPEN instead of reusing the wrong pane. If either side is not a git repo, the fallback identity is the directory path itself.
 - Widths are configurable through `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS`.
 
 In one sentence: **lazygit handles Git interactions; herdr decides how wide lazygit should be right now and where supporting UI should open.**
@@ -78,7 +79,7 @@ Resolved keybinding decisions:
 
 Free-key analysis is **machine work, not manual work**. `scripts/free-keys.py` parses the complete default keybinding section emitted by `lazygit --config` (all 167 remappable actions, cross-checked against the bundled `schema/config.json`) and prints a candidate-key × panel occupancy matrix. Its `check KEY context...` subcommand validates conflicts in real time for the generation layer and settings-page remapping. The conclusions are recorded in Appendix A.
 
-## 4. Three-Layer Configuration Model
+## 4. Layered Configuration Model
 
 ```
   ①  lazygit-config.yml            Bundled layer — included in the plugin repository
@@ -88,12 +89,17 @@ Free-key analysis is **machine work, not manual work**. `scripts/free-keys.py` p
             │  LG_CONFIG_FILE merges from left to right
             ▼
   ②  generated.yml                 Generated layer — built by gen-config-layer.sh from
-      ($HERDR_PLUGIN_CONFIG_DIR)    keys.conf and panel.conf; regenerated immediately after
-                                   settings changes or layout toggles. Its header marks it as
+      ($HERDR_PLUGIN_CONFIG_DIR)    keys.conf; regenerated after settings changes that affect
+                                   plugin-owned keys/customCommands. Its header marks it as
                                    machine-generated; do not edit it.
             │
             ▼
-  ③  lazygit-user.yml              User layer — handwritten and always last, so it always wins.
+  ③  layout-<pid>-<epoch>.yml      Per-pane layout layer — created by run-lazygit.sh and
+      ($HERDR_PLUGIN_CONFIG_DIR)    rewritten by toggle-expand.sh. Stores only this pane's
+                                   layout-dependent GUI settings.
+            │
+            ▼
+  ④  lazygit-user.yml              User layer — handwritten and always last, so it always wins.
       ($HERDR_PLUGIN_CONFIG_DIR)    Put personal settings and built-in key remapping here.
 ```
 
@@ -101,17 +107,18 @@ Merge behavior (verified experimentally and essential to the layering model):
 
 - For ordinary fields, later files override earlier files field by field.
 - `customCommands` arrays are **appended across files**; for the same key + context, the later file wins (so the user layer can override a complete command from the generated layer).
-- **A missing file is a fatal lazygit startup error.** Before constructing `LG_CONFIG_FILE`, `run-lazygit.sh` must therefore call `gen-config-layer.sh` (idempotent and millisecond-scale) to ensure that layers ② and ③ exist, and only then `exec lazygit`.
+- **A missing file is a fatal lazygit startup error.** Before constructing `LG_CONFIG_FILE`, `run-lazygit.sh` must therefore call `gen-config-layer.sh` and create both the per-pane layout layer and `lazygit-user.yml`, and only then `exec lazygit`.
 
 Configuration-file responsibilities (all files live in `$HERDR_PLUGIN_CONFIG_DIR`, falling back to `~/.config/herdr-lazygit`):
 
 | File | Writer | Contents |
 | --- | --- | --- |
 | `keys.conf` | Settings page | **Only** the keys for the three verbs: `KEY_COMMIT` / `KEY_ZOOM` / `KEY_SETTINGS` (sourceable by the shell; missing = default). Built-in key remapping does **not** belong here; that belongs in the user-layer `lazygit-user.yml` |
-| `panel.conf` | Settings page / Expand handler | `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS` / `LAYOUT_MODE` |
+| `panel.conf` | Settings page / user by hand | Global preferences only: `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS` / `INHERIT_USER_CONFIG` / `RUNTIME_*_BIN` |
 | `ai-backend.conf` | Settings page | `AI_BACKEND` / `AI_CUSTOM_CMD` / per-backend model settings |
 | `prompt.txt` | Settings page (`$EDITOR`) | Custom prompt for AI commits |
-| `generated.yml` | `gen-config-layer.sh` | Mode-specific GUI settings + the three verb customCommands; the header marker records both keys and layout |
+| `generated.yml` | `gen-config-layer.sh` | Global plugin layer: the three verb customCommands plus any compatibility `keybinding` disables; the header marker records the validated keys |
+| `layout-<pid>-<epoch>.yml` | `run-lazygit.sh` / `toggle-expand.sh` | Pane-local GUI settings: `sidePanelWidth`, `expandFocusedSidePanel`, `portraitMode`, plus a header marker for `sidebar` vs `expanded` |
 | `lazygit-user.yml` | User | Any lazygit configuration; always wins |
 
 ## 5. Hot-Reload Model
@@ -119,18 +126,25 @@ Configuration-file responsibilities (all files live in `$HERDR_PLUGIN_CONFIG_DIR
 On terminal **focus-in**, lazygit 0.63.0 stats all configuration files and fully hot-reloads them when an mtime has changed, including rebuilding its keybinding table through `resetKeybindings`. Verified in herdr: edit YAML externally, switch away, and switch back to the pane for the change to take effect without a restart. This is the settings page's entire activation mechanism — **the filesystem is the bus; there is no IPC, signal, or restart**:
 
 ```
-Change a setting / press U to toggle the layout
-  → write keys.conf / panel.conf / ai-backend.conf
-  → immediately call gen-config-layer.sh to rewrite generated.yml
-  → switch back to the lazygit pane, or let the U handler inject CSI focus-in
+Change a setting
+  → write keys.conf / panel.conf / ai-backend.conf as needed
+  → immediately call gen-config-layer.sh when the generated global layer changes
+  → switch back to the lazygit pane
   → lazygit stats the changes and hot-reloads
   → new keybindings/configuration take effect
+
+Press U to toggle the layout
+  → rewrite only this pane's layout-<pid>-<epoch>.yml
+  → call set-width on the current herdr pane
+  → inject CSI focus-in into lazygit
+  → lazygit stats the changed layout file and hot-reloads
+  → the current pane switches layout; other panes do not
 ```
 
 Two supporting conventions:
 
 - The settings interface always displays the message "Changes apply automatically when you return to the lazygit pane (hot reload)" to set user expectations.
-- `run-lazygit.sh` also runs the generator (idempotently) immediately before `exec`, ensuring cold starts and hot reloads see the same generated layer. There is one generation path and no competing source of truth.
+- `run-lazygit.sh` also runs the generator (idempotently) and seeds a fresh per-pane layout layer immediately before `exec`, ensuring cold starts and hot reloads see the same global command layer while each pane starts in sidebar mode.
 
 ## 6. Reproducible Runtime Packaging
 

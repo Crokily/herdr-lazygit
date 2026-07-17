@@ -32,7 +32,8 @@
 #                    default; stores only the three plugin verb keys; edit
 #                    lazygit-user.yml to remap built-in keys)
 #   panel.conf       SIDEBAR_COLS / EXPAND_COLS / COMMIT_COLS / SETTINGS_COLS
-#                    / LAYOUT_MODE
+#                    (plus optional INHERIT_USER_CONFIG / RUNTIME_* overrides
+#                    written by hand outside Settings)
 #
 # Test hooks: HERDR_LAZYGIT_GEN_SH / HERDR_LAZYGIT_FREE_KEYS can override the
 # gen-config-layer.sh / free-keys.py paths (for self-tests; normally unset).
@@ -71,7 +72,7 @@ PANEL_CONF="$CONFIG_DIR/panel.conf"
 
 KEYS_CONF_HEADER='# keys.conf — keys for the three herdr-lazygit plugin verbs (written by settings, read by gen-config-layer.sh).
 # Stores only plugin verb keys; edit lazygit-user.yml to remap built-in lazygit keys.'
-PANEL_CONF_HEADER='# panel.conf — herdr-lazygit pane geometry and layout state. Written by settings and layout scripts.'
+PANEL_CONF_HEADER='# panel.conf — herdr-lazygit global pane preferences. Written by settings; may also contain manual INHERIT_USER_CONFIG / RUNTIME_* overrides.'
 
 MSG=""        # Result of the previous action, shown in the main-menu header
 GEN_NOTE=""   # Result note from regen, appended to MSG
@@ -85,10 +86,9 @@ GEN_NOTE=""   # Result note from regen, appended to MSG
 load_confs() {
   AI_BACKEND="auto"; AI_CUSTOM_CMD=""
   AI_CLAUDE_MODEL="haiku"; AI_CODEX_MODEL=""
-  AI_OPENCODE_MODEL="google/gemini-2.5-flash"; AI_GEMINI_MODEL=""
+  AI_OPENCODE_MODEL="google/gemini-2.5-flash"; AI_GEMINI_MODEL="gemini-2.5-flash"
   KEY_COMMIT=""; KEY_ZOOM=""; KEY_SETTINGS=""
   SIDEBAR_COLS=""; EXPAND_COLS=""; COMMIT_COLS=""; SETTINGS_COLS=""
-  LAYOUT_MODE="sidebar"
   # shellcheck disable=SC1090
   { [ -f "$AI_CONF" ] && . "$AI_CONF"; } || true
   # shellcheck disable=SC1090

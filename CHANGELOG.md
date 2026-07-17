@@ -3,6 +3,41 @@
 Notable changes to the herdr-lazygit plugin. Versions track `version` in
 `herdr-plugin.toml`; the format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-07-17
+
+### Added
+
+- Top-level MIT `LICENSE` for the repository (`Copyright (c) 2026 Crokily`).
+- Explicit Gemini model pinning support through `AI_GEMINI_MODEL`, defaulting to
+  `gemini-2.5-flash` unless the variable is set to an empty string to defer to
+  the Gemini CLI default.
+- README and `README.zh-CN.md` AI data-disclosure sections explaining that
+  pressing `C` sends the staged diff plus the plugin prompt text to the
+  selected local AI CLI, using the full diff when it fits the configured
+  budget and otherwise a structured sample with a complete file overview and a
+  bounded patch body; the CLI then forwards it to the provider under the
+  user's account, and the plugin itself has no telemetry.
+
+### Fixed
+
+- Multiple lazygit panes no longer overwrite each other's sidebar/expanded
+  state: `LAYOUT_MODE` was removed from global `panel.conf`, the shared
+  `generated.yml` no longer carries layout-specific GUI state, and each pane
+  now gets its own `layout-<pid>-<epoch>.yml` layer that starts in sidebar
+  mode and is cleaned up opportunistically on future startups.
+- The README model-cost claim now states the real defaults: claude uses
+  `haiku`, opencode uses `google/gemini-2.5-flash`, gemini uses
+  `gemini-2.5-flash`, and codex uses the Codex CLI's configured default unless
+  `AI_CODEX_MODEL` is set.
+- AI commit generation no longer head-truncates large staged diffs. It now
+  sends the full diff when it fits `DIFF_MAX_CHARS`, otherwise builds a
+  structured sample with a complete per-file overview, round-robin hunk
+  sampling across normal files, deprioritized lockfile/minified/binary patch
+  bodies, and an explicit coverage note.
+- The `open` / `open-tab` launchers no longer reuse a `Git` pane from the
+  wrong repository or a different worktree of the same repository; reuse now
+  requires the same git worktree (or the same directory for non-git targets).
+
 ## [0.2.0] - 2026-07-17
 
 ### Added
