@@ -11,14 +11,19 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/herdr-lazygit-resolution-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
 # Stub lazygit: reports a configurable user config dir and version, and echoes
-# the LG_CONFIG_FILE it was launched with (exit code via FAKE_EXIT).
+# the LG_CONFIG_FILE / HERDR_LAZYGIT_LAYOUT_FILE it was launched with (exit
+# code via FAKE_EXIT).
 stub="$tmp/stub-lazygit"
 cat > "$stub" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
   --print-config-dir) printf '%s\n' "${FAKE_USER_DIR:-}" ;;
   --version) printf 'commit=x, build date=x, build source=binaryRelease, version=%s, os=darwin, arch=arm64, git version=2.50.1 (Apple Git-155)\n' "${FAKE_VERSION:-0.63.0}" ;;
-  *) printf 'STUB_LG_CONFIG_FILE=%s\n' "${LG_CONFIG_FILE:-}"; exit "${FAKE_EXIT:-0}" ;;
+  *)
+    printf 'STUB_LG_CONFIG_FILE=%s\n' "${LG_CONFIG_FILE:-}"
+    printf 'STUB_LAYOUT_FILE=%s\n' "${HERDR_LAZYGIT_LAYOUT_FILE:-}"
+    exit "${FAKE_EXIT:-0}"
+    ;;
 esac
 EOF
 chmod 0755 "$stub"
@@ -37,32 +42,57 @@ run_pane() {
     bash "$repo_root/scripts/run-lazygit.sh" </dev/null
 }
 
+layers_from_output() {
+  printf '%s\n' "$1" | sed -n 's/^STUB_LG_CONFIG_FILE=//p'
+}
+
+layout_from_output() {
+  printf '%s\n' "$1" | sed -n 's/^STUB_LAYOUT_FILE=//p'
+}
+
 # --- Layer 0 is inherited by default and merges under the plugin layers ------
 out="$(run_pane "$tmp/conf-default" 2>/dev/null)"
-case "$out" in
-  "STUB_LG_CONFIG_FILE=$user_dir/config.yml,$repo_root/lazygit-config.yml,"*) ;;
+layout_file="$(layout_from_output "$out")"
+case "$layout_file" in
+  "$tmp/conf-default/layout-"*-*.yml) ;;
   *)
-    echo "expected the user config as the first layer, got: $out" >&2
+    echo "expected a per-pane layout file under conf-default, got: $layout_file" >&2
+    exit 1
+    ;;
+esac
+[ -f "$layout_file" ]
+grep -q '^# layout: sidebar$' "$layout_file"
+case "$(layers_from_output "$out")" in
+  "$user_dir/config.yml,$repo_root/lazygit-config.yml,$tmp/conf-default/generated.yml,$layout_file,$tmp/conf-default/lazygit-user.yml") ;;
+  *)
+    echo "expected the user config first and the per-pane layout layer before lazygit-user.yml, got: $out" >&2
     exit 1
     ;;
 esac
 
 # --- INHERIT_USER_CONFIG=0 drops layer 0 --------------------------------------
 mkdir -p "$tmp/conf-optout"
-printf "INHERIT_USER_CONFIG=0\n" > "$tmp/conf-optout/panel.conf"
+printf "INHERIT_USER_CONFIG=0\nSIDEBAR_COLS=55\n" > "$tmp/conf-optout/panel.conf"
 out="$(run_pane "$tmp/conf-optout" 2>/dev/null)"
-case "$out" in
-  "STUB_LG_CONFIG_FILE=$repo_root/lazygit-config.yml,"*) ;;
+layout_file="$(layout_from_output "$out")"
+case "$(layers_from_output "$out")" in
+  "$repo_root/lazygit-config.yml,$tmp/conf-optout/generated.yml,$layout_file,$tmp/conf-optout/lazygit-user.yml") ;;
   *)
     echo "expected no inherited layer with INHERIT_USER_CONFIG=0, got: $out" >&2
     exit 1
     ;;
 esac
+if grep -q '^LAYOUT_MODE=' "$tmp/conf-optout/panel.conf"; then
+  echo "panel.conf should retain only global settings; found LAYOUT_MODE after startup" >&2
+  cat "$tmp/conf-optout/panel.conf" >&2
+  exit 1
+fi
 
 # --- No personal config file: layer 0 is simply absent ------------------------
 out="$(run_pane "$tmp/conf-nouser" FAKE_USER_DIR="$tmp/does-not-exist" 2>/dev/null)"
-case "$out" in
-  "STUB_LG_CONFIG_FILE=$repo_root/lazygit-config.yml,"*) ;;
+layout_file="$(layout_from_output "$out")"
+case "$(layers_from_output "$out")" in
+  "$repo_root/lazygit-config.yml,$tmp/conf-nouser/generated.yml,$layout_file,$tmp/conf-nouser/lazygit-user.yml") ;;
   *)
     echo "expected no inherited layer without a personal config, got: $out" >&2
     exit 1

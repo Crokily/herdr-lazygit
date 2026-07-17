@@ -19,6 +19,11 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ### Fixed
 
+- Multiple lazygit panes no longer overwrite each other's sidebar/expanded
+  state: `LAYOUT_MODE` was removed from global `panel.conf`, the shared
+  `generated.yml` no longer carries layout-specific GUI state, and each pane
+  now gets its own `layout-<pid>-<epoch>.yml` layer that starts in sidebar
+  mode and is cleaned up opportunistically on future startups.
 - The README model-cost claim now states the real defaults: claude uses
   `haiku`, opencode uses `google/gemini-2.5-flash`, gemini uses
   `gemini-2.5-flash`, and codex uses the Codex CLI's configured default unless

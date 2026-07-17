@@ -125,7 +125,7 @@ Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open 
 ### Key details
 
 - `C` reads **staged** content only — stage first, then press. It overrides the files panel's built-in "commit using git editor" binding; rebind that in `lazygit-user.yml` if you use it. One `GitCommit` pane exists per tab.
-- `U` is a global binding that toggles `LAYOUT_MODE` between `sidebar` and `expanded`. Expanded width defaults to 110 columns and is clamped to the tab width minus 20. Reopening the plugin always starts in sidebar mode.
+- `U` is a global binding that toggles the current pane's per-instance layout layer between `sidebar` and `expanded`. Expanded width defaults to 110 columns and is clamped to the tab width minus 20. Every new pane starts in sidebar mode, and other panes keep their own mode.
 - `U` and `;` are the defaults produced by a free-key analysis of every lazygit 0.63.0 built-in binding: candidate `Z` is taken by `universal.redo`; `Ctrl+S` and `O` collide with the filtering menu and the PR menu; `U` and `;` are unbound in every panel (full occupancy matrix in [DESIGN.md](DESIGN.md) Appendix A). The key-picking rule: plugin keys must not shadow commonly used lazygit built-ins. `v` (range select) and `V` (cherry-pick paste) stay stock for the same reason.
 - Keys persist in `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`.
 
@@ -143,15 +143,16 @@ AI_CUSTOM_CMD=""
 
 `detected` in the settings pane means the CLI is installed; it does not guarantee the CLI is logged in or eligible. Failure hints include the backend name and a one-line stderr summary.
 
-### Three config layers
+### Config layers
 
-The plugin loads three lazygit config layers via `LG_CONFIG_FILE`; later layers win:
+The plugin loads four plugin-managed lazygit config layers via `LG_CONFIG_FILE`; later layers win:
 
 1. The bundled base layer `lazygit-config.yml` (factory settings — do not edit; plugin updates overwrite it)
-2. The generated layer `$HERDR_PLUGIN_CONFIG_DIR/generated.yml` (written from keys and layout mode — machine-generated, do not edit)
-3. Your override layer `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml` (created on first run; always last, always wins)
+2. The generated global layer `$HERDR_PLUGIN_CONFIG_DIR/generated.yml` (written from keys/customCommands — machine-generated, do not edit)
+3. The per-pane layout layer `$HERDR_PLUGIN_CONFIG_DIR/layout-<pid>-<epoch>.yml` (written on pane start and by `U`; stores only this pane's sidebar/expanded state)
+4. Your override layer `$HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml` (created on first run; always last, always wins)
 
-Scalar settings are overridden field by field. `customCommands` entries accumulate across layers, and the later file wins on the same key + context, so the override layer can replace any plugin command. The generated layer owns the mode-dependent `sidePanelWidth` plus `expandFocusedSidePanel: true` and `portraitMode: never`; the base layer enables mouse support and disables random tips. Neither sets a Nerd Font (add `gui.nerdFontsVersion: "3"` to your override layer if you use one).
+Scalar settings are overridden field by field. `customCommands` entries accumulate across layers, and the later file wins on the same key + context, so the override layer can replace any plugin command. The per-pane layout layer owns the mode-dependent `sidePanelWidth` plus `expandFocusedSidePanel: true` and `portraitMode: never`; the base layer enables mouse support and disables random tips. Neither sets a Nerd Font (add `gui.nerdFontsVersion: "3"` to your override layer if you use one).
 
 To remap a plugin key, use the settings pane (stored in `keys.conf`). To remap a lazygit built-in, add a `keybinding` section to `lazygit-user.yml`.
 
@@ -177,6 +178,7 @@ scripts/
   open-settings-pane.sh      # Settings handler: opens the settings pane
   settings-fzf.sh            # the fzf menu loop inside the settings pane
   gen-config-layer.sh        # keys.conf -> generated.yml (machine-generated layer)
+  layout-layer.sh            # per-pane layout layer read/write helpers
   free-keys.py               # keybinding occupancy analysis / conflict check
   layout-helper.py           # absolute pane geometry over the herdr socket
 ```
@@ -185,10 +187,11 @@ Per-user state lives in `$HERDR_PLUGIN_CONFIG_DIR` (falls back to `~/.config/her
 
 ```
 keys.conf                    # plugin keys: KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS
-panel.conf                   # pane widths + LAYOUT_MODE (sidebar/expanded)
+panel.conf                   # global pane widths + optional INHERIT_USER_CONFIG / RUNTIME_* overrides
 ai-backend.conf              # AI backend / per-backend model
 prompt.txt                   # custom AI commit prompt
-generated.yml                # machine-generated lazygit layer — do not edit
+generated.yml                # machine-generated global lazygit layer — do not edit
+layout-<pid>-<epoch>.yml     # machine-generated per-pane layout layer — do not edit
 lazygit-user.yml             # your lazygit overrides — always wins
 ```
 

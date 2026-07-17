@@ -1,9 +1,12 @@
-# Bundled lazygit configuration for herdr-lazygit (the first of three layers).
+# Bundled lazygit configuration for herdr-lazygit (the first plugin-managed
+# layer).
 #
 # Loaded through LG_CONFIG_FILE by scripts/run-lazygit.sh in this order:
 #   lazygit-config.yml (this bundled file)
 #     → $HERDR_PLUGIN_CONFIG_DIR/generated.yml (machine-generated plugin keys
 #        and customCommands, produced from keys.conf by gen-config-layer.sh)
+#     → $HERDR_PLUGIN_CONFIG_DIR/layout-*.yml (machine-generated per-pane
+#        layout state)
 #     → $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml (user-authored, always last
 #        and therefore always wins)
 #
