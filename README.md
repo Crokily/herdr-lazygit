@@ -4,6 +4,42 @@
 
 A [herdr](https://herdr.dev) plugin that runs [lazygit](https://github.com/jesseduffield/lazygit) in a narrow sidebar pane, with AI commit message generation. Press one key to open the sidebar, one key to expand it into the full lazygit layout, and one key to commit with an AI-written message.
 
+## Quick start
+
+### Let an AI agent install it
+
+Copy this prompt into an AI coding agent running on the machine where you use herdr:
+
+```text
+Install and configure herdr-lazygit from https://github.com/Crokily/herdr-lazygit for me. Follow the repository README and work idempotently: check that herdr >= 0.7.0 and the required tools are available; run `herdr plugin install crokily/herdr-lazygit`; use the installed herdr CLI/help to locate my active `config.toml`; back it up; and add the documented `prefix+g` and `prefix+shift+g` plugin-action keybindings only if they are missing. Do not overwrite unrelated settings or create duplicate bindings. If either key already has a different binding, stop and show me the conflict instead of choosing a replacement. Reload the herdr config, verify that the plugin is installed and the config reload succeeds, then report exactly what you changed. Do not use sudo or install system packages.
+```
+
+The AI CLI used by the optional commit-message feature is separate from installation. The git sidebar, staging, history, sync, and layout features work without an AI CLI; only `C` requires one.
+
+### Install manually
+
+Requires herdr >= 0.7.0 plus `bash`, `git`, and Python >= 3.7 (`python3`) on `PATH`. The build also needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`.
+
+```sh
+herdr plugin install crokily/herdr-lazygit
+```
+
+Add the launcher keybindings to your active herdr `config.toml`:
+
+```toml
+[[keys.command]]              # lazygit: open in a split
+key = "prefix+g"
+type = "plugin_action"
+command = "herdr-lazygit.open"
+
+[[keys.command]]              # lazygit: open in its own tab
+key = "prefix+shift+g"
+type = "plugin_action"
+command = "herdr-lazygit.open-tab"
+```
+
+Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
+
 ![herdr-lazygit demo](docs/media/demo.gif)
 
 <sub>Demo recorded automatically by Fable 5 with the [promo-gif](https://github.com/Crokily/colys-agent-lab/tree/main/skills/promo-gif) skill.</sub>
@@ -60,9 +96,9 @@ That CLI then forwards the request to its provider's service under **your** acco
 
 ![The AI commit pane](docs/media/commit-pane.png)
 
-## Install
+## Runtime and advanced installation
 
-Requires herdr >= 0.7.0 plus `bash`, `git`, and Python >= 3.7 (`python3`) on `PATH`. During a GitHub install, the plugin downloads pinned private copies of lazygit 0.63.0 and fzf 0.74.0, verifies repository-pinned SHA-256 digests, and stores them under its managed `bin/` directory. It never invokes Homebrew, a system package manager, or `sudo`. The build also needs `curl` or `wget`, `tar`, and `sha256sum` or `shasum`.
+During a GitHub install, the plugin downloads pinned private copies of lazygit 0.63.0 and fzf 0.74.0, verifies repository-pinned SHA-256 digests, and stores them under its managed `bin/` directory. It never invokes Homebrew, a system package manager, or `sudo`.
 
 ### Why a private lazygit?
 
@@ -93,30 +129,15 @@ HERDR_LAZYGIT_FZF_BASE_URL='https://your-mirror/junegunn/fzf/releases/download' 
   /bin/sh scripts/install-runtime.sh
 ```
 
-```sh
-herdr plugin install crokily/herdr-lazygit
+### Local development
 
-# Local development: plugin link does not run [[build]], so prepare the runtime first.
+`herdr plugin link` does not run the manifest's `[[build]]` command, so prepare the private runtime before linking a checkout:
+
+```sh
 cd /path/to/herdr-lazygit
 /bin/sh scripts/install-runtime.sh
 herdr plugin link "$PWD"
 ```
-
-Then add keybindings to your herdr `config.toml`:
-
-```toml
-[[keys.command]]              # lazygit: open in a split
-key = "prefix+g"
-type = "plugin_action"
-command = "herdr-lazygit.open"
-
-[[keys.command]]              # lazygit: open in its own tab
-key = "prefix+shift+g"
-type = "plugin_action"
-command = "herdr-lazygit.open-tab"
-```
-
-Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
 
 > **Note (herdr platform behavior):** an action's context always resolves from the pane that currently has **UI focus**, not from a background process. The action opens lazygit next to the user's focused pane, takes its cwd from that pane, and focuses the new pane. Trigger these actions only through foreground keybindings.
 
@@ -164,6 +185,8 @@ lazygit-config.yml           # bundled base config (factory layer)
 DESIGN.md                    # design doc: three-verb model, key rules, config layers
 THIRD_PARTY_NOTICES.md       # licenses for downloaded lazygit/fzf binaries
 bin/                         # generated private lazygit + fzf runtime (not committed)
+demo/                        # maintainer-only, reproducible demo choreography
+docs/media/                  # final media referenced by this README
 scripts/
   install-runtime.sh         # install-time: download + verify the private runtime
   runtime-versions.sh        # pinned lazygit/fzf versions
@@ -181,6 +204,7 @@ scripts/
   layout-layer.sh            # per-pane layout layer read/write helpers
   free-keys.py               # keybinding occupancy analysis / conflict check
   layout-helper.py           # absolute pane geometry over the herdr socket
+tests/                       # hermetic installer, runtime, launcher, layout, and AI tests
 ```
 
 Per-user state lives in `$HERDR_PLUGIN_CONFIG_DIR` (falls back to `~/.config/herdr-lazygit`):

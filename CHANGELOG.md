@@ -3,6 +3,30 @@
 Notable changes to the herdr-lazygit plugin. Versions track `version` in
 `herdr-plugin.toml`; the format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Copy-ready AI-agent installation prompts in the English and Chinese quick
+  starts, with idempotent config editing, conflict handling, reload, and
+  verification instructions.
+- `demo/README.md` documenting the maintainer-only demo choreography and its
+  recording prerequisites.
+
+### Changed
+
+- Moved the normal manual install and keybinding setup ahead of the feature
+  tour; advanced runtime, mirror, and linked-checkout details now have their
+  own section.
+- Clarified that an AI CLI is optional and only required for `C`, not for the
+  core lazygit sidebar.
+- Made `demo/launch-stage.sh` executable and renamed the CI job display title
+  to cover the full test suite.
+
+### Removed
+
+- Unreferenced `docs/media/demo.mp4` and `docs/media/sidebar.png` assets.
+
 ## [0.3.0] - 2026-07-17
 
 ### Added
