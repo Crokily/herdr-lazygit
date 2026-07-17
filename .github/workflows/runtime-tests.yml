@@ -41,6 +41,9 @@ jobs:
       - name: Test launcher repo-identity decisions
         run: bash tests/launcher-decision-test.sh
 
+      - name: Test AI diff sampling
+        run: bash tests/ai-diff-sampling-test.sh
+
       - name: Check script syntax
         shell: bash
         run: |

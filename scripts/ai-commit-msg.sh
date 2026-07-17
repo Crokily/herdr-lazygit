@@ -25,7 +25,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 TIMEOUT_SEC="${AI_TIMEOUT_SEC:-60}"
-DIFF_MAX_CHARS=8000
+DIFF_MAX_CHARS="${DIFF_MAX_CHARS:-8000}"
 BACKEND_ORDER="claude codex opencode gemini"   # auto detection order
 
 # Per-backend models: commit messages are a small task, so defaults deliberately
@@ -45,6 +45,7 @@ MSG_NO_BACKEND="(no available AI CLI found: claude/codex/opencode/gemini)"
 MSG_NO_CUSTOM_CMD="(custom backend has no AI_CUSTOM_CMD — edit ai-backend.conf or choose another backend in Settings)"
 MSG_TIMEOUT="(AI generation timed out; retry or choose another backend)"
 MSG_FAILED="(AI generation failed; check the backend login or choose another backend)"
+MSG_DIFF_PREP_FAILED="(failed to prepare the staged diff for AI commit generation)"
 
 PROMPT='Generate up to 3 alternative conventional commit messages (feat/fix/docs/refactor/chore/test/perf/build/ci/style) for the following git diff. Output ONLY the commit messages, one per line, at most 3 lines. Each message must be a single line in English with a subject of at most 72 characters. No numbering, no bullets, no markdown, no quotes, no explanations.'
 
@@ -163,6 +164,315 @@ sys.stdout.write("\n".join(out))
 '
 }
 
+# Build the exact staged-diff payload passed to the AI CLI. Small diffs go
+# through unchanged; large diffs become a structured sample with a complete
+# per-file overview, a fair round-robin hunk sample, and a coverage note.
+build_ai_diff_payload() {
+  python3 - "$DIFF_MAX_CHARS" <<'PY'
+import os
+import subprocess
+import sys
+
+limit = int(sys.argv[1])
+lockfiles = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock"}
+coverage_text = "input is a sample of the staged diff"
+coverage_placeholder = (
+    "\nCOVERAGE: sampled 9999/9999 files, 99999/99999 hunks; "
+    + coverage_text
+    + "\n"
+)
+patch_section_header = "\nPATCH SAMPLE\n"
+
+
+def git_bytes(*args):
+    return subprocess.check_output(["git"] + list(args), stderr=subprocess.DEVNULL)
+
+
+def git_text(*args):
+    return git_bytes(*args).decode("utf-8", "replace")
+
+
+def parse_name_status():
+    data = git_bytes("diff", "--cached", "--name-status", "-z", "--find-renames")
+    parts = data.decode("utf-8", "replace").split("\0")
+    if parts and parts[-1] == "":
+        parts.pop()
+    entries = []
+    i = 0
+    while i < len(parts):
+        status = parts[i]
+        i += 1
+        code = status[:1]
+        old_path = ""
+        path = ""
+        if code in ("R", "C") and i + 1 < len(parts):
+            old_path = parts[i]
+            path = parts[i + 1]
+            i += 2
+        elif i < len(parts):
+            path = parts[i]
+            i += 1
+        else:
+            break
+        display = path if not old_path or old_path == path else old_path + " -> " + path
+        entries.append(
+            {
+                "status": status,
+                "path": path,
+                "old_path": old_path,
+                "display": display,
+            }
+        )
+    return entries
+
+
+def parse_numstat():
+    data = git_bytes("diff", "--cached", "--numstat", "-z", "--find-renames")
+    entries = []
+    i = 0
+    size = len(data)
+    while i < size:
+        tab1 = data.find(b"\t", i)
+        if tab1 == -1:
+            break
+        added_raw = data[i:tab1].decode("utf-8", "replace")
+        i = tab1 + 1
+
+        tab2 = data.find(b"\t", i)
+        if tab2 == -1:
+            break
+        deleted_raw = data[i:tab2].decode("utf-8", "replace")
+        i = tab2 + 1
+
+        old_path = ""
+        if i < size and data[i:i + 1] == b"\0":
+            i += 1
+            nul = data.find(b"\0", i)
+            if nul == -1:
+                break
+            old_path = data[i:nul].decode("utf-8", "replace")
+            i = nul + 1
+
+            nul = data.find(b"\0", i)
+            if nul == -1:
+                break
+            path = data[i:nul].decode("utf-8", "replace")
+            i = nul + 1
+        else:
+            nul = data.find(b"\0", i)
+            if nul == -1:
+                path = data[i:].decode("utf-8", "replace")
+                i = size
+            else:
+                path = data[i:nul].decode("utf-8", "replace")
+                i = nul + 1
+
+        binary = added_raw == "-" or deleted_raw == "-"
+        entries.append(
+            {
+                "path": path,
+                "old_path": old_path,
+                "added": None if binary else int(added_raw),
+                "deleted": None if binary else int(deleted_raw),
+                "binary": binary,
+            }
+        )
+    return entries
+
+
+def is_deprioritized(path, binary):
+    base = os.path.basename(path)
+    return (
+        binary
+        or base in lockfiles
+        or path.endswith(".min.js")
+        or path.endswith(".min.css")
+    )
+
+
+def split_patch(patch_text):
+    if not patch_text:
+        return "", []
+    lines = patch_text.splitlines(True)
+    header = []
+    hunks = []
+    current = None
+    for line in lines:
+        if line.startswith("@@"):
+            current = [line]
+            hunks.append(current)
+        elif current is None:
+            header.append(line)
+        else:
+            current.append(line)
+    if hunks:
+        return "".join(header), ["".join(hunk) for hunk in hunks]
+    return "", [patch_text]
+
+
+def load_patch_text(path, old_path):
+    candidates = []
+    if path:
+        candidates.append(path)
+    if old_path and old_path != path:
+        candidates.append(old_path)
+    for candidate in candidates:
+        patch_text = git_text("diff", "--cached", "-U2", "--", candidate)
+        if patch_text:
+            return patch_text
+    return ""
+
+
+def render_overview(files, total_added, total_deleted, binary_files):
+    total_line = "total: %d files, +%d -%d" % (len(files), total_added, total_deleted)
+    if binary_files:
+        total_line += ", %d binary" % binary_files
+    lines = ["STAGED DIFF OVERVIEW", total_line]
+    for entry in files:
+        if entry["binary"]:
+            count_text = "binary"
+        else:
+            count_text = "+%d -%d" % (entry["added"], entry["deleted"])
+        lines.append("%s %s %s" % (entry["status"], count_text, entry["display"]))
+    return "\n".join(lines) + "\n"
+
+
+def select_hunks(files, budget):
+    def round_robin(group, remaining):
+        while remaining > 0:
+            progressed = False
+            for entry in group:
+                if entry["cursor"] >= len(entry["chunks"]):
+                    continue
+                chunk_index = entry["cursor"]
+                chunk_text = entry["chunks"][chunk_index]
+                extra = 0
+                if not entry["selected"] and entry["header"]:
+                    extra = len(entry["header"])
+                cost = len(chunk_text) + extra
+                if cost <= remaining:
+                    entry["selected"].append(chunk_index)
+                    entry["cursor"] += 1
+                    remaining -= cost
+                    progressed = True
+                else:
+                    continue
+            if not progressed:
+                break
+        return remaining
+
+    normal = [entry for entry in files if entry["chunks"] and not entry["deprioritized"]]
+    remaining_budget = round_robin(normal, budget)
+    deprioritized = [entry for entry in files if entry["chunks"] and entry["deprioritized"]]
+    remaining_budget = round_robin(deprioritized, remaining_budget)
+    return remaining_budget
+
+
+def render_output(files, overview_text):
+    patch_blocks = []
+    sampled_files = 0
+    sampled_hunks = 0
+    total_hunks = sum(len(entry["chunks"]) for entry in files)
+    for entry in files:
+        if not entry["selected"]:
+            continue
+        sampled_files += 1
+        sampled_hunks += len(entry["selected"])
+        block = ""
+        if entry["header"]:
+            block += entry["header"]
+        block += "".join(entry["chunks"][idx] for idx in entry["selected"])
+        patch_blocks.append(block)
+
+    coverage_note = (
+        "COVERAGE: sampled %d/%d files, %d/%d hunks; %s\n"
+        % (sampled_files, len(files), sampled_hunks, total_hunks, coverage_text)
+    )
+
+    pieces = [overview_text]
+    if patch_blocks:
+        pieces.append(patch_section_header)
+        pieces.append("".join(patch_blocks))
+        if not patch_blocks[-1].endswith("\n"):
+            pieces.append("\n")
+    pieces.append("\n")
+    pieces.append(coverage_note)
+    return "".join(pieces)
+
+
+def drop_last_chunk(files):
+    for entry in reversed(files):
+        if entry["selected"]:
+            entry["selected"].pop()
+            return True
+    return False
+
+
+full_diff = git_text("diff", "--cached")
+if len(full_diff) <= limit:
+    sys.stdout.write(full_diff)
+    sys.exit(0)
+
+name_entries = parse_name_status()
+numstat_entries = parse_numstat()
+file_count = max(len(name_entries), len(numstat_entries))
+files = []
+total_added = 0
+total_deleted = 0
+binary_files = 0
+
+for idx in range(file_count):
+    name_entry = name_entries[idx] if idx < len(name_entries) else {}
+    num_entry = numstat_entries[idx] if idx < len(numstat_entries) else {}
+
+    path = name_entry.get("path") or num_entry.get("path") or ""
+    old_path = name_entry.get("old_path") or num_entry.get("old_path") or ""
+    if not path:
+        continue
+
+    status = name_entry.get("status", "?")
+    display = name_entry.get("display") or (old_path + " -> " + path if old_path and old_path != path else path)
+    binary = bool(num_entry.get("binary"))
+    added = num_entry.get("added")
+    deleted = num_entry.get("deleted")
+    if binary:
+        binary_files += 1
+    else:
+        total_added += int(added or 0)
+        total_deleted += int(deleted or 0)
+
+    patch_text = load_patch_text(path, old_path)
+    header, chunks = split_patch(patch_text)
+    files.append(
+        {
+            "status": status,
+            "display": display,
+            "path": path,
+            "old_path": old_path,
+            "added": added or 0,
+            "deleted": deleted or 0,
+            "binary": binary,
+            "deprioritized": is_deprioritized(path, binary),
+            "header": header,
+            "chunks": chunks,
+            "cursor": 0,
+            "selected": [],
+        }
+    )
+
+overview_text = render_overview(files, total_added, total_deleted, binary_files)
+patch_budget = limit - len(overview_text) - len(patch_section_header) - len(coverage_placeholder)
+if patch_budget > 0:
+    select_hunks(files, patch_budget)
+
+assembled = render_output(files, overview_text)
+while len(assembled) > limit and drop_last_chunk(files):
+    assembled = render_output(files, overview_text)
+
+sys.stdout.write(assembled)
+PY
+}
+
 # ---------------------------------------------------------------------------
 # Backend invocations (diff through stdin, prompt through argv; see the Spike
 # for verified behavior).
@@ -258,11 +568,20 @@ cmd_candidates() {
   load_config
 
   local diff backend raw rc result
-  diff="$(git diff --cached 2>/dev/null || true)"
-  if [ -z "$diff" ]; then
+  if git diff --cached --quiet --exit-code 2>/dev/null; then
     printf '%s\n' "$MSG_NO_STAGED"
     return 0
   fi
+
+  if [ "${HERDR_LAZYGIT_TEST_PRINT_AI_INPUT:-}" = "1" ]; then
+    build_ai_diff_payload
+    return 0
+  fi
+
+  diff="$(build_ai_diff_payload)" || {
+    printf '%s\n' "$MSG_DIFF_PREP_FAILED"
+    return 0
+  }
 
   backend="$(resolve_backend)"
   if [ -z "$backend" ]; then
@@ -275,16 +594,6 @@ cmd_candidates() {
     esac
     return 0
   fi
-
-  # Truncate the diff.
-  diff="$(printf '%s' "$diff" | python3 -c '
-import sys
-limit = int(sys.argv[1])
-d = sys.stdin.read()
-if len(d) > limit:
-    d = d[:limit] + "\n\n[diff truncated at " + str(limit) + " chars]"
-sys.stdout.write(d)
-' "$DIFF_MAX_CHARS")"
 
   local err_file hint
   err_file="$(mktemp "${TMPDIR:-/tmp}/ai-commit-msg.err.XXXXXX")"
