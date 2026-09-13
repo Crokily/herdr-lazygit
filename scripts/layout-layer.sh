@@ -8,6 +8,46 @@
 #
 # bash 3.2 compatible (macOS default).
 
+# panel.conf remains shell-sourceable. Keep its output separate from the
+# values returned to callers, and don't let a syntax error terminate them.
+herdr_lazygit_load_launch_preferences() {
+  local file="$1" placement="${2:-split}" values mode default_mode
+  DEFAULT_MODE_SPLIT=sidebar
+  DEFAULT_MODE_TAB=expanded
+  SIDEBAR_COLS=42
+  EXPAND_COLS=110
+  if [ -f "$file" ]; then
+    if values="$(
+      . "$file" >/dev/null || exit 1
+      printf 'DEFAULT_MODE_SPLIT=%q\nDEFAULT_MODE_TAB=%q\nSIDEBAR_COLS=%q\nEXPAND_COLS=%q\n' \
+        "$DEFAULT_MODE_SPLIT" "$DEFAULT_MODE_TAB" "$SIDEBAR_COLS" "$EXPAND_COLS"
+    )"; then
+      eval "$values"
+    else
+      printf 'herdr-lazygit: could not read %s; using default launch preferences.\n' "$file" >&2
+    fi
+  fi
+  if [ "$placement" = tab ]; then
+    mode="$DEFAULT_MODE_TAB"; default_mode=expanded
+  else
+    mode="$DEFAULT_MODE_SPLIT"; default_mode=sidebar
+  fi
+  case "$mode" in
+    sidebar|expanded) ;;
+    *)
+      printf 'herdr-lazygit: invalid initial %s layout %s; using %s.\n' "$placement" "$mode" "$default_mode" >&2
+      mode="$default_mode"
+      ;;
+  esac
+  case "$SIDEBAR_COLS" in *[!0-9]*|'') SIDEBAR_COLS=42 ;; esac
+  case "$EXPAND_COLS" in *[!0-9]*|'') EXPAND_COLS=110 ;; esac
+  if ! [ "$SIDEBAR_COLS" -ge 20 ] 2>/dev/null || ! [ "$SIDEBAR_COLS" -le 500 ] 2>/dev/null; then SIDEBAR_COLS=42; fi
+  if ! [ "$EXPAND_COLS" -ge 80 ] 2>/dev/null || ! [ "$EXPAND_COLS" -le 500 ] 2>/dev/null; then EXPAND_COLS=110; fi
+  HERDR_LAZYGIT_INITIAL_MODE="$mode"
+  HERDR_LAZYGIT_INITIAL_COLS="$SIDEBAR_COLS"
+  [ "$mode" != expanded ] || HERDR_LAZYGIT_INITIAL_COLS="$EXPAND_COLS"
+}
+
 herdr_lazygit_normalize_layout_mode() {
   case "${1:-}" in
     sidebar|expanded) printf '%s\n' "$1" ;;

@@ -72,6 +72,7 @@ if ! herdr_lazygit_require_runtime fzf; then
   IFS= read -rsn1 _ || true
   exit 1
 fi
+herdr_lazygit_version_notice fzf
 
 candidates_file="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.candidates.XXXXXX")"
 error_file="$(mktemp "${TMPDIR:-/tmp}/herdr-lazygit.ai-error.XXXXXX")"

@@ -33,7 +33,7 @@ For every new feature, ask first: which verb does it belong to? If it belongs to
 | External interface | `customCommands` + configuration hot reload on focus-in | `pane split/run/close/send-text` + direct socket access through `layout-helper.py` |
 | What we consume | The Commit entry point in the files context and the global Expand / Settings entry points | `place-diff` / `set-width` / `set-region-width` (absolute column widths) |
 
-There are two normal layouts. Their state is pane-local: `run-lazygit.sh` creates a dedicated `layout-<pid>-<epoch>.yml` layer for each lazygit pane, seeded to `sidebar`, and `toggle-expand.sh` rewrites only that file:
+There are two normal layouts. Their state is pane-local: `run-lazygit.sh` creates a dedicated `layout-<pid>-<epoch>.yml` layer for each lazygit pane, seeded from the launcher's explicit initial mode, and `toggle-expand.sh` rewrites only that file. New splits default to `sidebar`; new tabs default to `expanded`. `DEFAULT_MODE_SPLIT` and `DEFAULT_MODE_TAB` in `panel.conf` override those defaults independently. Invalid values warn and use the corresponding built-in default. These preferences affect new panes only; reusing a pane preserves its mode and placement. An expanded split uses the same bounded width as Expand; a single-pane tab retains its full width.
 
 ```
 sidebar                                  expanded
@@ -47,8 +47,11 @@ sidebar                                  expanded
 - `U` rewrites the pane-local layout layer first, then calls `set-width`, and finally injects CSI focus-in into lazygit. This hot-reloads the new layout within the same keypress without touching any other pane's state.
 - AI Commit / Settings remain temporary wide panes to the right of the sidebar. While one is visible, lazygit is temporarily set to `SIDEBAR_COLS`. Before it exits, it restores the sidebar/expanded width that was active when it opened; `exit` then closes the pane automatically.
 - Only one pane of each type may exist at a time. Any existing pane is found by label and closed first: `GitCommit` / `GitSettings`.
-- The `open` / `open-tab` launchers reuse only within the current workspace and only when the candidate pane's `foreground_cwd` (fallback `cwd`) resolves to the same git worktree as the launch target (`git rev-parse --show-toplevel` on both sides). Different repositories, different worktrees of the same repository, or any cwd/git-resolution failure all degrade to OPEN instead of reusing the wrong pane. If either side is not a git repo, the fallback identity is the directory path itself.
+- The `open` / `open-tab` launchers reuse only within the invoking workspace and only when the candidate pane's `foreground_cwd` (fallback `cwd`) resolves to the same git worktree as the launch target (`git rev-parse --show-toplevel` on both sides). Different repositories, different worktrees of the same repository, or unresolvable candidate paths are not reused. Non-git directories use their directory identity. Failed Herdr queries, malformed responses, and command timeouts fail visibly rather than being mistaken for an absent pane. A failed mutation is never retried automatically: a timeout may mean the server already applied it.
+- Launcher context is captured once from `HERDR_PLUGIN_CONTEXT_JSON`; split creation names the source pane and tab creation names the workspace. When no action context is supplied (manual invocation), query the current pane once. Never replace an explicit source with a later UI focus. A vanished source fails instead of opening elsewhere.
+- A shared launcher helper owns a non-inheritable OS lock per user/server/workspace, from state inspection through the final mutation and initial sizing. Both actions share that lock; unrelated servers/workspaces do not. Commands have individual and overall deadlines; timeout cleanup targets only the command's process group. Errors go to action stderr and a bounded, best-effort Herdr notification. Lock files are stable coordination points and are not removed to recover from contention.
 - Widths are configurable through `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS`.
+- Herdr 0.7.0 lacks `layout.set_split_ratio`. Only an explicit unknown-method rejection enables the `pane.resize` compatibility path: select a pane on the correct split boundary and apply a bounded ratio delta without changing focus or recreating terminals. `layout.apply` must never be used for resizing because it replaces the target tab's terminals. All versions retain Herdr's own ratio limits.
 
 In one sentence: **lazygit handles Git interactions; herdr decides how wide lazygit should be right now and where supporting UI should open.**
 
@@ -107,23 +110,23 @@ Merge behavior (verified experimentally and essential to the layering model):
 
 - For ordinary fields, later files override earlier files field by field.
 - `customCommands` arrays are **appended across files**; for the same key + context, the later file wins (so the user layer can override a complete command from the generated layer).
-- **A missing file is a fatal lazygit startup error.** Before constructing `LG_CONFIG_FILE`, `run-lazygit.sh` must therefore call `gen-config-layer.sh` and create both the per-pane layout layer and `lazygit-user.yml`, and only then `exec lazygit`.
+- **A missing file is a fatal lazygit startup error.** Before constructing `LG_CONFIG_FILE`, `run-lazygit.sh` must therefore call `gen-config-layer.sh` and create both the per-pane layout layer and `lazygit-user.yml`, and only then start lazygit.
 
 Configuration-file responsibilities (all files live in `$HERDR_PLUGIN_CONFIG_DIR`, falling back to `~/.config/herdr-lazygit`):
 
 | File | Writer | Contents |
 | --- | --- | --- |
 | `keys.conf` | Settings page | **Only** the keys for the three verbs: `KEY_COMMIT` / `KEY_ZOOM` / `KEY_SETTINGS` (sourceable by the shell; missing = default). Built-in key remapping does **not** belong here; that belongs in the user-layer `lazygit-user.yml` |
-| `panel.conf` | Settings page / user by hand | Global preferences only: `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS` / `INHERIT_USER_CONFIG` / `RUNTIME_*_BIN` |
+| `panel.conf` | Settings page / user by hand | Global preferences only: `DEFAULT_MODE_SPLIT` / `DEFAULT_MODE_TAB` / `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS` / `INHERIT_USER_CONFIG` / `RUNTIME_*_BIN` |
 | `ai-backend.conf` | Settings page | `AI_BACKEND` / `AI_CUSTOM_CMD` / per-backend model settings |
 | `prompt.txt` | Settings page (`$EDITOR`) | Custom prompt for AI commits |
-| `generated.yml` | `gen-config-layer.sh` | Global plugin layer: the three verb customCommands plus any compatibility `keybinding` disables; the header marker records the validated keys |
+| `generated.yml` | `gen-config-layer.sh` | Global plugin layer: the three verb customCommands with no native key disables; header markers record requested and effective keys |
 | `layout-<pid>-<epoch>.yml` | `run-lazygit.sh` / `toggle-expand.sh` | Pane-local GUI settings: `sidePanelWidth`, `expandFocusedSidePanel`, `portraitMode`, plus a header marker for `sidebar` vs `expanded` |
 | `lazygit-user.yml` | User | Any lazygit configuration; always wins |
 
 ## 5. Hot-Reload Model
 
-On terminal **focus-in**, lazygit 0.63.0 stats all configuration files and fully hot-reloads them when an mtime has changed, including rebuilding its keybinding table through `resetKeybindings`. Verified in herdr: edit YAML externally, switch away, and switch back to the pane for the change to take effect without a restart. This is the settings page's entire activation mechanism — **the filesystem is the bus; there is no IPC, signal, or restart**:
+On terminal **focus-in**, lazygit stats all configuration files and fully hot-reloads them when an mtime has changed, including rebuilding its keybinding table through `resetKeybindings`. Verified in herdr: edit YAML externally, switch away, and switch back to the pane for the change to take effect without a restart. This is the settings page's entire activation mechanism — **the filesystem is the bus; there is no IPC, signal, or restart**:
 
 ```
 Change a setting
@@ -143,8 +146,8 @@ Press U to toggle the layout
 
 Two supporting conventions:
 
-- The settings interface always displays the message "Changes apply automatically when you return to the lazygit pane (hot reload)" to set user expectations.
-- `run-lazygit.sh` also runs the generator (idempotently) and seeds a fresh per-pane layout layer immediately before `exec`, ensuring cold starts and hot reloads see the same global command layer while each pane starts in sidebar mode.
+- The settings interface explains that key changes apply on return and initial-layout preferences apply to new panes only.
+- `run-lazygit.sh` also runs the generator (idempotently) and seeds a fresh per-pane layout layer before starting lazygit, ensuring cold starts and hot reloads see the same global command layer. Initial-layout preferences apply only to newly created panes; changes to those preferences do not reset running panes.
 
 ## 6. Reproducible Runtime Packaging
 
@@ -204,9 +207,9 @@ The criterion in one sentence: **we consume only lazygit's official interfaces (
 
 ---
 
-## Appendix A: Free-Key Analysis (lazygit 0.63.0, verified during the 2026-07 integration phase)
+## Appendix A: Free-Key Analysis (lazygit 0.65.0, verified 2026-09-13)
 
-Data source: the complete default keybinding section printed by `lazygit --config` (185 lines / 11 sections), parsed by `scripts/free-keys.py` and cross-checked against the bundled `schema/config.json`.
+Data source: the pinned runtime's complete `lazygit --config` output, parsed by `scripts/free-keys.py`: 167 remappable actions across 11 sections. The candidate matrix below was reproduced with the downloaded 0.65.0 Linux ARM64 binary.
 The keybinding table changes between lazygit versions. After an upgrade, run `python3 scripts/free-keys.py` to reproduce the matrix below and update this appendix accordingly.
 
 ### Candidate-Key × Panel Occupancy Matrix
@@ -238,4 +241,4 @@ The keybinding table changes between lazygit versions. After an upgrade, run `py
    - `;` ✓ — unused in every section, so it is selected.
    - `,` was not reached (it is occupied by `universal.prevPage` and would be rejected if reached).
 3. **`C` stays**: it shadows only `files.commitChangesWithEditor` (an accepted exception; see Section 3 for the rationale). Although `commits.cherryPickCopy` also uses C, KEY_COMMIT is declared only in the `files` context, so it is unaffected.
-4. **Implication for global keys**: panel-level built-ins with the same key shadow KEY_ZOOM / KEY_SETTINGS, so the settings page validates them using the global context. The defaults `U` / `;` are unused across all sections. The generated layer retains conditional `<disabled>` compatibility for handwritten KEY_SETTINGS configurations.
+4. **Implication for global keys**: panel-level built-ins with the same key shadow KEY_ZOOM / KEY_SETTINGS, so the settings page validates them using the global context. The defaults `U` / `;` are unused across all sections. The generator checks all three effective plugin keys, including conflicts between plugin actions. Conflicting handwritten preferences fall back to a free plugin key with a warning; native bindings and `keys.conf` are preserved. Settings displays effective keys separately from saved preferences.

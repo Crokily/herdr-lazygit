@@ -7,6 +7,10 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ### Added
 
+- Independent **Initial Split Layout** / **Initial Tab Layout** settings
+  (`DEFAULT_MODE_SPLIT` / `DEFAULT_MODE_TAB`), applying only to newly opened panes.
+- Stateful launcher regressions and an isolated real-Herdr/runtime smoke test.
+- Windows contribution review and a staged CI plan; Windows support remains unclaimed.
 - Copy-ready AI-agent installation prompts in the English and Chinese quick
   starts, with idempotent config editing, conflict handling, reload, and
   verification instructions.
@@ -15,6 +19,13 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ### Changed
 
+- New tabs start expanded with the diff visible; splits still start in sidebar
+  mode. Reused panes keep their layout and placement. Set `DEFAULT_MODE_TAB=sidebar`
+  to retain the old tab default.
+- Private runtime updated to lazygit 0.65.0 and fzf 0.74.4, with all eight
+  macOS/Linux archive digests refreshed and verified.
+- Conflicting handwritten plugin keys use free alternatives, with a warning
+  and effective bindings shown in Settings, instead of disabling native keys.
 - Moved the normal manual install and keybinding setup ahead of the feature
   tour; advanced runtime, mirror, and linked-checkout details now have their
   own section.
@@ -22,6 +33,19 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
   core lazygit sidebar.
 - Made `demo/launch-stage.sh` executable and renamed the CI job display title
   to cover the full test suite.
+
+### Fixed
+
+- Launchers share a non-inherited OS lock per user/server/workspace, use bounded
+  commands without pipe-EOF waits, and report failures in logs and a best-effort
+  Herdr notification. Query errors no longer masquerade as absent panes; failed
+  mutations are not retried automatically.
+- Split/tab actions retain their invoking pane/workspace instead of taking a
+  later UI focus as the target. Cross-tab reuse focuses the matching Git pane.
+- Layout RPC/CLI operations have deadlines, and initial expanded splits use
+  the configured width while leaving room for the sibling region.
+- Herdr 0.7.0 resizes through the existing `pane.resize` API when the absolute
+  ratio method is unavailable, preserving terminals and the declared minimum.
 
 ### Removed
 

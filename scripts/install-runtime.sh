@@ -63,19 +63,19 @@ esac
 lazygit_asset="lazygit_${LAZYGIT_VERSION}_${os}_${lazygit_arch}.tar.gz"
 fzf_asset="fzf-${FZF_VERSION}-${os}_${fzf_arch}.tar.gz"
 
-# Digests copied from the upstream v0.63.0 and v0.74.0 checksum files. Keeping
+# Digests copied from the upstream v0.65.0 and v0.74.4 checksum files. Keeping
 # them in the repository means a compromised or corrupted archive cannot be
 # trusted merely because a checksum sidecar came from the same download host.
 expected_checksum() {
   case "$1" in
-    lazygit:darwin:arm64)  printf '%s\n' '60e6bf29a1501a57a9d078538aa576a1b4db45779db2e3dd6931a7207f560a9c' ;;
-    lazygit:darwin:x86_64) printf '%s\n' '304b1bf7f7bbb5a5d59e34145bce63d42733cd828e4fe41428ced9ee4dbfe942' ;;
-    lazygit:linux:arm64)   printf '%s\n' 'aac147abf5ce43afe6ae8bcb14b0d479111975a189302d7a99386deca70d57f7' ;;
-    lazygit:linux:x86_64)  printf '%s\n' 'cf5cfa3e116d7775f3600a51ec1d9ce7ba554a08b9566c7c2da83cb0023efabf' ;;
-    fzf:darwin:arm64)      printf '%s\n' 'da60e8980e4239a0fc5f1fcfe873f243dfda93a6a13b696b00e1dc8584a77a87' ;;
-    fzf:darwin:amd64)      printf '%s\n' 'e2c470f058ac18615f54c0bebe0fd2956f2aa8e306a11621783a00aaa386eedd' ;;
-    fzf:linux:arm64)       printf '%s\n' 'bd9e6165ebdb702215d42368cbb95b8dd70a4e77ee97925adac8c31660e30ef7' ;;
-    fzf:linux:amd64)       printf '%s\n' 'cf919f05b7581b4c744d764eaa704665d61dd6d3ca785f0df2351281dff60cda' ;;
+    lazygit:darwin:arm64)  printf '%s\n' 'd8ea1cade9e4279e45cbb58652e84edb07e98a9f8ec0604099c8b0a8f709e63a' ;;
+    lazygit:darwin:x86_64) printf '%s\n' '3848033450205f975aa6a587e76f01c9796bff3a3cc0e32060ac77b9423264e3' ;;
+    lazygit:linux:arm64)   printf '%s\n' 'd954a09c128bd37b2bd0d254308474e87de3729cfe0e37f5b46a49357a4fe257' ;;
+    lazygit:linux:x86_64)  printf '%s\n' '44d8e7dd1484b4a66e191bd4ab25a71e8b4b3a65ab122f838e65677ef58c5506' ;;
+    fzf:darwin:arm64)      printf '%s\n' '4f6a113bfc0c7959e0005c78d566a51afc4fcefc956f43735c62a9deb19e92ae' ;;
+    fzf:darwin:amd64)      printf '%s\n' '2d392b50be66e2ab104ccd52a6072df692b1f9b9c5b449a9c098de885f32c4c5' ;;
+    fzf:linux:arm64)       printf '%s\n' '5d673b849f494f0d64ec471d8640b153ca8849e3846a31da17abdcfce8df6b46' ;;
+    fzf:linux:amd64)       printf '%s\n' '05e6813a337cc722c3ed07e54a764b75cc5d671e2e60459db0ba696ee5fa7504' ;;
     *) return 1 ;;
   esac
 }

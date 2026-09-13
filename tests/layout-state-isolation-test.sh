@@ -13,7 +13,7 @@ cat > "$stub" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
   --print-config-dir) printf '%s\n' "${FAKE_USER_DIR:-}" ;;
-  --version) printf 'commit=x, build date=x, build source=binaryRelease, version=%s, os=darwin, arch=arm64, git version=2.50.1 (Apple Git-155)\n' "${FAKE_VERSION:-0.63.0}" ;;
+  --version) printf 'commit=x, build date=x, build source=binaryRelease, version=%s, os=darwin, arch=arm64, git version=2.50.1 (Apple Git-155)\n' "${FAKE_VERSION:-0.65.0}" ;;
   *)
     printf 'STUB_LG_CONFIG_FILE=%s\n' "${LG_CONFIG_FILE:-}"
     printf 'STUB_LAYOUT_FILE=%s\n' "${HERDR_LAZYGIT_LAYOUT_FILE:-}"
@@ -27,6 +27,9 @@ cat > "$fake_helper" <<'EOF'
 import os
 import sys
 
+if sys.argv[1] == 'tab-width':
+    print(160)
+    sys.exit(0)
 with open(os.environ["FAKE_LAYOUT_HELPER_LOG"], "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\n")
 EOF
@@ -84,6 +87,17 @@ layout_file="$(layout_from_output "$out")"
 [ ! -e "$dead_layout" ]
 grep -q '^# layout: sidebar$' "$layout_file"
 grep -q '^  sidePanelWidth: 0.99$' "$layout_file"
+
+# The launcher's explicit initial mode is pane-local; an existing layer is
+# unaffected by another pane's expanded start.
+out="$(run_pane "$cleanup_conf" HERDR_LAZYGIT_INITIAL_MODE=expanded 2>/dev/null)"
+expanded_file="$(layout_from_output "$out")"
+grep -q '^# layout: expanded$' "$expanded_file"
+grep -q '^  sidePanelWidth: 0.3333$' "$expanded_file"
+[ "$expanded_file" != "$layout_file" ]
+# The earlier stub process has exited, so its layer is eligible for cleanup;
+# the live layer created above must still be preserved.
+[ -e "$live_layout" ]
 
 # ---------------------------------------------------------------------------
 # KEY_ZOOM rewrites only the pane-local layout file. panel.conf stays global

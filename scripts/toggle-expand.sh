@@ -44,13 +44,7 @@ if [ "$LAYOUT_MODE" = "sidebar" ]; then
   # After expanding, leave at least 20 columns for the tab's other workspace.
   # In a normal tab (>=100 columns), also keep lazygit at least 80 columns wide.
   # When a narrower tab cannot satisfy both constraints, preserve the workspace.
-  tab_width="$("$herdr_bin" pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | python3 -c '
-import json, sys
-try:
-    print(int(json.load(sys.stdin)["result"]["layout"]["area"]["width"]))
-except Exception:
-    print(0)
-' || echo 0)"
+  tab_width="$(python3 "$helper" tab-width "$HERDR_PANE_ID" 2>/dev/null || printf '0')"
   case "$tab_width" in *[!0-9]*|'') tab_width=0 ;; esac
   if [ "$tab_width" -gt 20 ]; then
     max_cols=$((tab_width - 20))
