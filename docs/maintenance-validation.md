@@ -127,8 +127,10 @@ an empty continuation cell, which pyte 0.8.2's `display` indexes as a nonempty
 string. A minimal ANSI replay reproduces the same `IndexError` locally.
 The test adapter now renders orphan continuation cells as blanks, with
 regressions for partial repaints, intact wide/combining characters and cleared
-diff content. The existing visible-client assertions remain in place. Hosted
-results are tracked on PR #6. Only Linux ARM64 binaries were executed locally;
+diff content. The existing visible-client assertions remain in place. All ten
+hosted jobs passed on `c147c52`, covering both Ubuntu and macOS and all four
+Herdr versions ([CI run](https://github.com/Crokily/herdr-lazygit/actions/runs/34794929041)).
+Only Linux ARM64 binaries were executed locally;
 checksum verification is not execution evidence for the other architectures.
 
 After testing the follow-up commit `bba1350`, the maintainer confirmed on
