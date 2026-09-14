@@ -50,6 +50,10 @@ type = "plugin_action"
 command = "herdr-lazygit.open-tab"
 ```
 
+Herdr 0.7.0 默认把 `prefix+shift+g` 分配给“新建 worktree”，且优先保留这个绑定。
+使用上面的插件键位时，请在已有的 `[keys]` 表中设置 `new_worktree = []`，或给该动作
+另选键位；否则 Herdr 会禁用插件的冲突绑定并显示配置警告。
+
 执行 `herdr server reload-config`。之后 `prefix+g` 的行为是：未打开 → 分屏打开；已打开但未聚焦 → 聚焦；已聚焦 → 关闭。
 
 新建分屏默认使用窄侧栏；新建独立 tab（`prefix+shift+g`）默认展开，直接显示 diff。
@@ -62,6 +66,11 @@ command = "herdr-lazygit.open-tab"
 初始布局，可设置 `DEFAULT_MODE_TAB=sidebar`。展开的分屏使用 `EXPAND_COLS`，并为相邻区域
 留出空间；独占 tab 保持整页宽度。若最终的 `lazygit-user.yml` 明确覆盖这些 GUI 字段，
 仍以用户配置为准。
+
+Herdr 0.9 的插件 pane 接口只更新服务端焦点，未必切换可见客户端，因此新建或跨 tab
+复用时会显式调用 `tab focus`。这个公开接口作用于整个 session：连接同一服务端的其他
+客户端也可能切换。插件 action context 没有客户端 ID，目前无法保证只切换触发快捷键
+的那个客户端。重复触发仍会复用同一仓库已有的 Git pane。
 
 启动失败会在 `herdr plugin log list --plugin herdr-lazygit` 中记录阶段与原因，并尝试显示
 一条无声的 Herdr 通知。等锁最多 2 秒，单条命令最多 3 秒，launcher 总预算 10 秒

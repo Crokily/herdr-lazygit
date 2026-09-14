@@ -2,7 +2,7 @@
 """Real runtime/Herdr regression in a disposable server with its own sockets.
 
 Usage: python3 tests/herdr-smoke-test.py /absolute/path/to/herdr
-Requires the plugin-private runtime to be installed. Never attaches to or
+Requires the plugin-private runtime and tests/requirements.txt. Never attaches to or
 changes the user's existing Herdr session. AI generation uses a local stub.
 """
 import json
@@ -21,7 +21,18 @@ import termios
 import threading
 import time
 
+import pyte
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class ClientScreen(pyte.Screen):
+    def report_device_status(self, mode=0, **kwargs):
+        # Herdr queries private terminal capabilities. The fixture emulates
+        # rendered cells, not a physical terminal's capability replies. pyte
+        # 0.8.2's base DSR handler does not accept the private keyword.
+        if not kwargs.get('private'):
+            super().report_device_status(mode)
 
 
 def main():
@@ -31,7 +42,12 @@ def main():
         repo = base / "repo space ' 中文"
         repo.mkdir()
         config = base/'config.toml'
-        config.write_text('onboarding = false\n[terminal]\ndefault_shell = "/bin/sh"\n')
+        # 0.7.0 prioritizes its default new-worktree binding over a custom
+        # command on the same key. Explicitly free the key in this fixture.
+        config.write_text('onboarding = false\n[terminal]\ndefault_shell = "/bin/sh"\n'
+                          '[keys]\nnew_worktree = []\n'
+                          '[[keys.command]]\nkey = "prefix+shift+g"\ntype = "plugin_action"\n'
+                          'command = "herdr-lazygit.open-tab"\n')
         # Every server/config/runtime path is private to this fixture. Clearing
         # inherited Herdr variables prevents accidentally targeting a live user
         # session, including when the test itself is launched inside Herdr.
@@ -48,7 +64,8 @@ def main():
         (repo/'test.txt').write_text('before\n')
         run(['git','-C',str(repo),'add','.'])
         run(['git','-C',str(repo),'commit','-qm','initial'])
-        (repo/'test.txt').write_text('after\n')
+        diff_text = 'HLG_VISIBLE_DIFF_LINE'
+        (repo/'test.txt').write_text(diff_text+'\n')
         run(['git','-C',str(repo),'add','.'])
         log = (base/'server.log').open('w')
         server = subprocess.Popen([herdr,'server'], env=env, cwd=repo,
@@ -56,6 +73,14 @@ def main():
         client = None
         master = None
         client_output = bytearray()
+        screen = ClientScreen(180,45)
+        stream = pyte.ByteStream(screen)
+        screen_lock = threading.Lock()
+        def visible_client():
+            with screen_lock:
+                return '\n'.join(screen.display)
+        def pane_screen(pane):
+            return run([herdr,'pane','read',pane,'--source','visible','--lines','80'])
         def cli(*args):
             output = run([herdr,*args])
             return json.loads(output)['result'] if output.strip() else {}
@@ -112,7 +137,10 @@ def main():
                 while client.poll() is None:
                     try:
                         if select.select([master],[],[],.1)[0]:
-                            client_output.extend(os.read(master,65536))
+                            data = os.read(master,65536)
+                            with screen_lock:
+                                stream.feed(data)
+                            client_output.extend(data)
                             del client_output[:-16000]
                     except OSError: break
             reader = threading.Thread(target=drain, daemon=True)
@@ -157,11 +185,24 @@ def main():
             layer = new_layer(before)
             assert mode_is(layer,'sidebar'), layer.read_text()
             wait_for(lambda:abs(width(git_pane)-42)<=2, 'sidebar width')
+            wait_for(lambda:'test.txt' in pane_screen(git_pane), 'initial lazygit rendering')
+            cli('pane','send-text',git_pane,'\x1b[O\x1b[I')
             cli('pane','send-text',git_pane,'U')
             wait_for(lambda:mode_is(layer,'expanded'), 'Expand custom command')
             target_width = min(110, cli('pane','layout','--pane',git_pane)['layout']['area']['width']-20)
             wait_for(lambda:abs(width(git_pane)-target_width)<=2, 'expanded width')
+            wait_for(lambda:'+'+diff_text in pane_screen(git_pane), 'rendered diff after Expand')
             expanded_width = width(git_pane)
+
+            # Keep lazygit focused and toggle repeatedly. An extra focus-in
+            # alone is ignored once lazygit already considers itself focused.
+            for next_mode in ('sidebar','expanded','sidebar','expanded'):
+                cli('pane','send-text',git_pane,'U')
+                wait_for(lambda:mode_is(layer,next_mode), next_mode+' layout')
+                if next_mode == 'expanded':
+                    wait_for(lambda:'+'+diff_text in pane_screen(git_pane), 'rendered expanded diff')
+                else:
+                    wait_for(lambda:diff_text not in pane_screen(git_pane), 'rendered sidebar without diff')
 
             # Settings and Commit exercise the actual fzf, preview commands,
             # lazygit contexts, shell quoting, and supporting-pane cleanup.
@@ -183,6 +224,10 @@ def main():
                         '--cwd',str(repo),'--focus')['root_pane']
             assert invoke('tab',other).startswith('SWITCHTAB')
             assert cli('pane','current')['pane']['pane_id']==git_pane
+            # A custom command can leave lazygit's main view on its command
+            # log. Preserve that user state; the live file list still proves
+            # this client selected the Git pane instead of the empty shell tab.
+            wait_for(lambda:'test.txt' in visible_client(), 'visible client cross-tab switch')
             target = next(p for p in panes() if p['pane_id']==git_pane)
             assert invoke('split',target).startswith('CLOSE')
             wait_for(lambda:not pane_exists(git_pane), 'toggle close')
@@ -195,10 +240,28 @@ def main():
             assert mode_is(layer,'expanded'), layer.read_text()
             layout = cli('pane','layout','--pane',git_pane)['layout']
             assert len(layout['panes'])==1
+            wait_for(lambda:'+'+diff_text in visible_client(), 'visible client new Git tab')
             tab_width = width(git_pane)
             cli('pane','send-text',git_pane,'U')
             wait_for(lambda:mode_is(layer,'sidebar'), 'full-tab toggle')
             assert width(git_pane)==tab_width, 'single-pane tab was narrowed'
+            cli('plugin','pane','close',git_pane)
+
+            # Trigger the actual configured prefix+shift+g through the client
+            # PTY. Neither focused=true nor a tab-bar label proves that the
+            # client switched; require the diff content in the rendered grid.
+            cli('tab','focus',other['tab_id'])
+            cli('pane','run',other['pane_id'], "printf '\\nHLG_SOURCE_VIEW\\n'")
+            wait_for(lambda:'HLG_SOURCE_VIEW' in visible_client(), 'source client view')
+            os.write(master,b'\x02G')
+            git_pane = wait_for(lambda:next(iter(labeled('Git')),None), 'keybinding Git tab')['pane_id']
+            wait_for(lambda:'+'+diff_text in visible_client(), 'keybinding visible Git diff')
+            for _ in range(2):
+                cli('tab','focus',other['tab_id'])
+                wait_for(lambda:'HLG_SOURCE_VIEW' in visible_client(), 'source view before repeat')
+                os.write(master,b'\x02G')
+                wait_for(lambda:'+'+diff_text in visible_client(), 'repeated keybinding visible Git diff')
+                assert len(labeled('Git'))==1 and labeled('Git')[0]['pane_id']==git_pane
             cli('plugin','pane','close',git_pane)
 
             (plugin_config/'panel.conf').write_text(
@@ -218,9 +281,10 @@ def main():
                                 for log in cli('plugin','log','list','--plugin','herdr-lazygit')['logs']),
                      'visible action failure')
             assert pane_exists(git_pane)
-            print(version+': real runtime, C/U/;, layout defaults, reuse, focus and close passed')
+            print(version+': real runtime, C/U/;, rendered layouts, client keybinding focus, reuse and close passed')
         except BaseException:
             print('Herdr smoke failure; server output:\n'+(base/'server.log').read_text()[-2500:], file=sys.stderr)
+            print('Visible client screen:\n'+visible_client(), file=sys.stderr)
             # These are only this fixture's terminals. Output helps diagnose a
             # config rejection or shell error that leaves a readable error pane.
             if server.poll() is None and (base/'api.sock').exists():
@@ -239,6 +303,7 @@ def main():
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(path,target)
                 (destination/'client.ansi').write_bytes(client_output)
+                (destination/'client-screen.txt').write_text(visible_client())
             raise
         finally:
             if client is not None:

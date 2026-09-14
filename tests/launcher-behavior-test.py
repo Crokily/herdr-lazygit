@@ -68,6 +68,10 @@ elif args[:3] == ['plugin', 'pane', 'open']:
     print(json.dumps({'result': {'plugin_pane': {'pane':pane}}}))
 elif args[:3] in (['plugin','pane','focus'], ['plugin','pane','close']):
     print(json.dumps({'result': {'success':True}}))
+elif args[:2] == ['tab','focus']:
+    if fault == 'tab-focus-timeout': time.sleep(30)
+    (root/'visible-tab').write_text(args[2])
+    print(json.dumps({'result': {'success':True}}))
 elif args[:2] == ['notification','show']:
     if fault == 'notification-timeout': time.sleep(30)
     print(json.dumps({'result': {'success':True}}))
@@ -134,26 +138,30 @@ class LauncherBehavior(unittest.TestCase):
         path = self.root/'calls'
         return [json.loads(line)['args'] for line in path.read_text().splitlines()] if path.exists() else []
 
+    def last_open(self):
+        return [c for c in self.calls() if c[:3] == ['plugin','pane','open']][-1]
+
     def test_new_tab_mode_and_explicit_workspace(self):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         call = next(c for c in self.calls() if c[:3] == ['plugin','pane','open'])
         self.assertIn('HERDR_LAZYGIT_INITIAL_MODE=expanded', call)
-        self.assertEqual(call[call.index('--cwd')+1], str(self.repo))
+        self.assertEqual(Path(call[call.index('--cwd')+1]).resolve(), self.repo.resolve())
         self.assertEqual(call[call.index('--workspace')+1], 'ws-1')
         self.assertFalse(any(c[:2] == ['pane','current'] for c in self.calls()))
+        self.assertEqual(self.calls()[-1], ['tab','focus','new-tab'])
 
     def test_tab_preference_and_invalid_value(self):
         conf = self.root/'config'/'panel.conf'
         conf.write_text('DEFAULT_MODE_TAB=sidebar\n')
         self.assertEqual(self.invoke().returncode, 0)
-        self.assertIn('HERDR_LAZYGIT_INITIAL_MODE=sidebar', self.calls()[-1])
+        self.assertIn('HERDR_LAZYGIT_INITIAL_MODE=sidebar', self.last_open())
         self.write_panes([self.source])
         conf.write_text('DEFAULT_MODE_TAB=wrong\n')
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('invalid initial tab layout', result.stderr)
-        self.assertIn('HERDR_LAZYGIT_INITIAL_MODE=expanded', self.calls()[-1])
+        self.assertIn('HERDR_LAZYGIT_INITIAL_MODE=expanded', self.last_open())
 
     def test_split_mode_and_width_are_selected_together(self):
         requests = []
@@ -206,7 +214,8 @@ class LauncherBehavior(unittest.TestCase):
         self.write_panes([self.source, self.git_pane(tab_id='tab-2')])
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls()[-1], ['plugin','pane','focus','git-pane'])
+        self.assertEqual(self.calls()[-2:], [['plugin','pane','focus','git-pane'],
+                                           ['tab','focus','tab-2']])
         self.assertFalse(any('--env' in c for c in self.calls()))
 
     def test_bootstrap_is_reused_while_lazygit_is_starting(self):
@@ -215,6 +224,17 @@ class LauncherBehavior(unittest.TestCase):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[-1], ['plugin','pane','focus','git-pane'])
+
+    def test_bootstrap_script_alias_resolves_to_the_same_entrypoint(self):
+        alias = self.root/'plugin alias'
+        alias.symlink_to(ROOT, target_is_directory=True)
+        self.env['HERDR_PLUGIN_ROOT'] = str(alias)
+        self.env['FAKE_FAULT'] = 'bootstrap'
+        self.write_panes([self.source, self.git_pane()])
+        result = self.invoke()
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(self.calls()[-1], ['plugin','pane','focus','git-pane'])
+        self.assertFalse(any(c[:3] == ['plugin','pane','open'] for c in self.calls()))
 
     def test_disappeared_source_fails_and_notifies(self):
         self.write_panes([])
@@ -257,7 +277,20 @@ class LauncherBehavior(unittest.TestCase):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(sum(c[:3] == ['plugin','pane','open'] for c in self.calls()), 1)
-        self.assertEqual(self.calls()[-1], ['plugin','pane','focus','new-git'])
+        self.assertEqual(self.calls()[-2:], [['plugin','pane','focus','new-git'],
+                                           ['tab','focus','new-tab']])
+
+    def test_tab_focus_timeout_keeps_created_pane_for_next_invocation(self):
+        self.env['FAKE_FAULT'] = 'tab-focus-timeout'
+        result = self.invoke()
+        self.assertEqual(result.returncode,1)
+        self.assertIn('tab focus',result.stderr)
+        self.env.pop('FAKE_FAULT')
+        result = self.invoke()
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue(result.stdout.startswith('SWITCHTAB'))
+        self.assertEqual(sum(c[:3] == ['plugin','pane','open'] for c in self.calls()),1)
+        self.assertEqual((self.root/'visible-tab').read_text(),'new-tab')
 
     def test_timed_out_layout_helper_also_terminates_its_cli_child(self):
         self.env['FAKE_FAULT'] = 'layout-timeout'

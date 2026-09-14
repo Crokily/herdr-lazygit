@@ -36,6 +36,14 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ### Fixed
 
+- Git tab creation and cross-tab reuse explicitly publish tab focus to Herdr
+  0.9 clients instead of trusting server-side `focused=true`. This uses Herdr's
+  session-wide public tab focus; client-local focus remains an upstream boundary.
+- Expand sends focus-out/focus-in together, so an already-focused lazygit reloads
+  the layout on consecutive toggles. Rendering regressions now assert visible
+  diff content and actual client switching through the configured keybinding.
+- Normalize bootstrap script aliases for reuse, and compare canonical paths in
+  launcher tests so macOS `/var` and `/private/var` aliases do not cause failures.
 - Launchers share a non-inherited OS lock per user/server/workspace, use bounded
   commands without pipe-EOF waits, and report failures in logs and a best-effort
   Herdr notification. Query errors no longer masquerade as absent panes; failed

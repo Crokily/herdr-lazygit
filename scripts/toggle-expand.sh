@@ -3,7 +3,7 @@
 #
 # Each lazygit pane inherits HERDR_LAZYGIT_LAYOUT_FILE from run-lazygit.sh. A
 # toggle rewrites only that per-pane YAML layer, adjusts the current lazygit
-# pane's absolute width, and then injects CSI focus-in so lazygit hot-reloads
+# pane's absolute width, and then injects CSI focus-out/focus-in so lazygit hot-reloads
 # the changed layout immediately. The script is called by a lazygit
 # customCommand, so HERDR_PANE_ID is this pane.
 #
@@ -58,6 +58,7 @@ fi
 herdr_lazygit_write_layout_layer "$layout_file" "$next_mode"
 python3 "$helper" set-width "$HERDR_PANE_ID" "$target_cols"
 
-# lazygit stats and hot-reloads all configuration on focus-in; inject the event
-# directly to switch the layout immediately.
-"$herdr_bin" pane send-text "$HERDR_PANE_ID" $'\x1b[I' >/dev/null
+# lazygit may ignore focus-in while it already considers itself focused.
+# Pair focus-out/focus-in so configuration reloads on every toggle, including
+# consecutive toggles without switching to another pane.
+"$herdr_bin" pane send-text "$HERDR_PANE_ID" $'\x1b[O\x1b[I' >/dev/null

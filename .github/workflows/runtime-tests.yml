@@ -78,6 +78,10 @@ jobs:
           persist-credentials: false
       - name: Install the pinned plugin-private runtime
         run: /bin/sh scripts/install-runtime.sh
+      - name: Install terminal rendering test dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/herdr-test-venv"
+          "$RUNNER_TEMP/herdr-test-venv/bin/python" -m pip install -r tests/requirements.txt
       - name: Download the Herdr version under test
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,7 +105,7 @@ jobs:
       - name: Exercise real lazygit, fzf, and Herdr in a private test server
         env:
           HERDR_LAZYGIT_TEST_ARTIFACT_DIR: ${{ runner.temp }}/herdr-smoke-artifacts
-        run: python3 tests/herdr-smoke-test.py "$RUNNER_TEMP/herdr-under-test"
+        run: '"$RUNNER_TEMP/herdr-test-venv/bin/python" tests/herdr-smoke-test.py "$RUNNER_TEMP/herdr-under-test"'
       - name: Retain isolated test diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

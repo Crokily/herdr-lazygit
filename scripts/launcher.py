@@ -211,7 +211,8 @@ class Launcher:
             argv = process.get("argv") or []
             if not isinstance(argv, list) or any(not isinstance(arg, str) for arg in argv):
                 raise LaunchError("Herdr returned invalid process arguments")
-            if "bash" in names and len(argv) == 2 and argv[1] == str(SCRIPT_DIR / "run-lazygit.sh"):
+            if ("bash" in names and len(argv) == 2 and os.path.isabs(argv[1])
+                    and os.path.realpath(argv[1]) == str(SCRIPT_DIR / "run-lazygit.sh")):
                 return True
         return False
 
@@ -252,8 +253,11 @@ class Launcher:
         if decision == "CLOSE":
             self.rpc("plugin", "pane", "close", match["pane_id"])
         elif decision in ("FOCUS", "SWITCHTAB"):
-            # Herdr plugin pane focus selects both the tab and the pane.
+            # Select the exact plugin pane first. Herdr 0.9's public plugin
+            # focus API updates server state without switching client views.
             self.rpc("plugin", "pane", "focus", match["pane_id"])
+            if decision == "SWITCHTAB":
+                self.rpc("tab", "focus", pane_id(match.get("tab_id")))
         else:
             args = ["plugin", "pane", "open", "--plugin", "herdr-lazygit",
                     "--entrypoint", "lazygit", "--placement", self.placement,
@@ -271,6 +275,17 @@ class Launcher:
             if self.placement == "split":
                 self.command([sys.executable, str(SCRIPT_DIR / "layout-helper.py"),
                               "set-width", target, str(self.cols)], "initial pane width")
+            else:
+                try:
+                    target_tab = pane_id(response["plugin_pane"]["pane"]["tab_id"])
+                except (KeyError, TypeError):
+                    raise LaunchError("invalid tab response; check existing panes before retrying") from None
+                # Keep --workspace above: creation must retain the invoking
+                # target. Explicit tab.focus publishes the selection to visible
+                # clients even when server state already reports it focused.
+                # This public API has session-wide semantics on Herdr 0.9;
+                # action context does not expose an originating client ID.
+                self.rpc("tab", "focus", target_tab)
 
     def report_error(self, error):
         elapsed = time.monotonic() - self.started

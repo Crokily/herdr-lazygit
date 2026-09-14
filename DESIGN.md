@@ -44,11 +44,12 @@ sidebar                                  expanded
 ```
 
 - Sidebar mode forces `sidePanelWidth: 0.99`, squeezing lazygit panels 1–5 into a single column. Expanded mode restores `0.3333`, making the native main view and every native interaction visible again. Both modes fix `portraitMode: never` to prevent abrupt automatic layout changes in tall panes.
-- `U` rewrites the pane-local layout layer first, then calls `set-width`, and finally injects CSI focus-in into lazygit. This hot-reloads the new layout within the same keypress without touching any other pane's state.
+- `U` rewrites the pane-local layout layer first, then calls `set-width`, and finally injects CSI focus-out followed by focus-in into lazygit. An already-focused lazygit ignores a repeated focus-in; the pair forces a real transition and configuration reload without changing another pane's layout state.
 - AI Commit / Settings remain temporary wide panes to the right of the sidebar. While one is visible, lazygit is temporarily set to `SIDEBAR_COLS`. Before it exits, it restores the sidebar/expanded width that was active when it opened; `exit` then closes the pane automatically.
 - Only one pane of each type may exist at a time. Any existing pane is found by label and closed first: `GitCommit` / `GitSettings`.
 - The `open` / `open-tab` launchers reuse only within the invoking workspace and only when the candidate pane's `foreground_cwd` (fallback `cwd`) resolves to the same git worktree as the launch target (`git rev-parse --show-toplevel` on both sides). Different repositories, different worktrees of the same repository, or unresolvable candidate paths are not reused. Non-git directories use their directory identity. Failed Herdr queries, malformed responses, and command timeouts fail visibly rather than being mistaken for an absent pane. A failed mutation is never retried automatically: a timeout may mean the server already applied it.
 - Launcher context is captured once from `HERDR_PLUGIN_CONTEXT_JSON`; split creation names the source pane and tab creation names the workspace. When no action context is supplied (manual invocation), query the current pane once. Never replace an explicit source with a later UI focus. A vanished source fails instead of opening elsewhere.
+- Herdr 0.9's public plugin open/focus handlers update server focus but omit the client-view projection performed by ordinary `tab.focus`. After creating a tab, explicitly focus the tab ID from the creation response; cross-tab reuse first selects the exact plugin pane, then focuses its tab. Keep explicit workspace targeting and never retry a failed creation. `tab.focus` has session-wide semantics on 0.9, so this compatibility step can change every attached client's view. The plugin's action context has no originating client ID; strictly client-local tab switching requires an upstream API extension. Validate actual client rendering, not `focused=true` alone.
 - A shared launcher helper owns a non-inheritable OS lock per user/server/workspace, from state inspection through the final mutation and initial sizing. Both actions share that lock; unrelated servers/workspaces do not. Commands have individual and overall deadlines; timeout cleanup targets only the command's process group. Errors go to action stderr and a bounded, best-effort Herdr notification. Lock files are stable coordination points and are not removed to recover from contention.
 - Widths are configurable through `SIDEBAR_COLS` / `EXPAND_COLS` / `COMMIT_COLS` / `SETTINGS_COLS`.
 - Herdr 0.7.0 lacks `layout.set_split_ratio`. Only an explicit unknown-method rejection enables the `pane.resize` compatibility path: select a pane on the correct split boundary and apply a bounded ratio delta without changing focus or recreating terminals. `layout.apply` must never be used for resizing because it replaces the target tab's terminals. All versions retain Herdr's own ratio limits.
@@ -126,7 +127,7 @@ Configuration-file responsibilities (all files live in `$HERDR_PLUGIN_CONFIG_DIR
 
 ## 5. Hot-Reload Model
 
-On terminal **focus-in**, lazygit stats all configuration files and fully hot-reloads them when an mtime has changed, including rebuilding its keybinding table through `resetKeybindings`. Verified in herdr: edit YAML externally, switch away, and switch back to the pane for the change to take effect without a restart. This is the settings page's entire activation mechanism — **the filesystem is the bus; there is no IPC, signal, or restart**:
+On a terminal **focus-out → focus-in transition**, lazygit stats all configuration files and fully hot-reloads them when an mtime has changed, including rebuilding its keybinding table through `resetKeybindings`. Repeating focus-in while already focused does not guarantee a reload. Edit YAML externally, switch away, and switch back to the pane for changes to take effect without a restart. The settings page uses this activation mechanism:
 
 ```
 Change a setting
@@ -139,7 +140,7 @@ Change a setting
 Press U to toggle the layout
   → rewrite only this pane's layout-<pid>-<epoch>.yml
   → call set-width on the current herdr pane
-  → inject CSI focus-in into lazygit
+  → inject CSI focus-out followed by focus-in into lazygit
   → lazygit stats the changed layout file and hot-reloads
   → the current pane switches layout; other panes do not
 ```

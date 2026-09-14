@@ -144,6 +144,10 @@ grep -q '^# layout: expanded$' "$layout_file"
 grep -q '^  sidePanelWidth: 0.3333$' "$layout_file"
 grep -q '^set-width test-pane 120$' "$helper_log"
 grep -q '^pane send-text test-pane ' "$herdr_log"
+python3 - "$herdr_log" <<'PY'
+import pathlib, sys
+assert b'\x1b[O\x1b[I' in pathlib.Path(sys.argv[1]).read_bytes(), 'expected paired focus-out/focus-in'
+PY
 [ "$before_panel" = "$(cat "$toggle_conf/panel.conf")" ]
 [ "$before_generated" = "$(cat "$generated")" ]
 if grep -q '^LAYOUT_MODE=' "$toggle_conf/panel.conf"; then

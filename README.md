@@ -50,6 +50,11 @@ type = "plugin_action"
 command = "herdr-lazygit.open-tab"
 ```
 
+Herdr 0.7.0 gives its default new-worktree binding priority on `prefix+shift+g`.
+For this binding, set `new_worktree = []` in your existing `[keys]` table (or
+assign that action another key). Otherwise Herdr disables the plugin binding
+with a config warning.
+
 Run `herdr server reload-config`. `prefix+g` then behaves as: not open → open in a split; open but unfocused → focus; focused → close.
 
 New splits start in the compact sidebar layout. New tabs (`prefix+shift+g`)
@@ -65,6 +70,13 @@ variant's default. Preferences apply only to new panes. Set
 Expanded splits use `EXPAND_COLS`, leaving space for the other pane; a
 single-pane tab always keeps its full width. Your final `lazygit-user.yml`
 layer still wins if it explicitly overrides the layout's GUI fields.
+
+On Herdr 0.9, opening or switching to a Git tab uses an explicit `tab focus`
+to update the visible client, because the plugin pane APIs alone only update
+server focus. Herdr's public tab focus is session-wide: other clients attached
+to that same server can switch too. Plugin action context does not expose a
+client ID, so this version cannot guarantee a switch confined to the invoking
+client. Repeated actions still reuse the matching repository's Git pane.
 
 Launcher failures now report their stage in `herdr plugin log list --plugin
 herdr-lazygit` and attempt a short, silent Herdr notification. Lock waiting is
