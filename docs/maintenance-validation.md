@@ -139,6 +139,14 @@ switched away by the still-running action. Keyboard tests now wait for the
 new action log to report success before changing tabs, while still requiring
 actual rendered diff content. Failed actions remain test failures.
 
+The v0.4.0 main-branch run passed all eight real-Herdr jobs but exposed a
+separate macOS concurrency-test assumption: its shortened 0.3-second lock
+deadline could expire, yet the test required both concurrent actions to
+succeed. The updated test deliberately delays focus by 0.5 seconds, accepts
+only the specific busy-lock failure, then verifies retry focuses the existing
+pane without creating or closing one. It also checks lock descriptors and
+cleans up every child and pipe on failure. Production deadlines are unchanged.
+
 After testing the follow-up commit `bba1350`, the maintainer confirmed on
 September 14 that the fixes work in the reported macOS/Ghostty environment
 with Herdr 0.9.0, including the tab-switch fix. This is maintainer-reported
