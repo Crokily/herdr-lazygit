@@ -38,8 +38,17 @@ jobs:
       - name: Test per-pane layout isolation
         run: bash tests/layout-state-isolation-test.sh
 
+      - name: Test layout geometry and Herdr 0.7 fallback
+        run: python3 tests/layout-geometry-test.py
+
       - name: Test launcher repo-identity decisions
         run: bash tests/launcher-decision-test.sh
+
+      - name: Test launcher concurrency, deadlines, and action targets
+        run: python3 tests/launcher-behavior-test.py
+
+      - name: Test initial-layout settings
+        run: bash tests/settings-layout-test.sh
 
       - name: Test AI diff sampling
         run: bash tests/ai-diff-sampling-test.sh
@@ -54,3 +63,55 @@ jobs:
             /bin/sh -n "$file"
           done
           python3 -m compileall -q scripts
+
+  herdr-runtime:
+    name: Herdr ${{ matrix.herdr }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        herdr: [v0.7.0, v0.7.5, v0.8.2, v0.9.0]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install the pinned plugin-private runtime
+        run: /bin/sh scripts/install-runtime.sh
+      - name: Install terminal rendering test dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/herdr-test-venv"
+          "$RUNNER_TEMP/herdr-test-venv/bin/python" -m pip install -r tests/requirements.txt
+      - name: Download the Herdr version under test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_HERDR_VERSION: ${{ matrix.herdr }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, platform, subprocess, urllib.request
+          release = json.loads(subprocess.check_output([
+              'gh', 'api', 'repos/herdrdev/herdr/releases/tags/' + os.environ['TEST_HERDR_VERSION']]))
+          system = {'Darwin': 'macos', 'Linux': 'linux'}[platform.system()]
+          arch = {'arm64': 'aarch64', 'aarch64': 'aarch64', 'x86_64': 'x86_64'}[platform.machine()]
+          asset = next(a for a in release['assets'] if a['name'] == 'herdr-' + system + '-' + arch)
+          with urllib.request.urlopen(asset['browser_download_url'], timeout=30) as response:
+              data = response.read()
+          assert asset['digest'] == 'sha256:' + hashlib.sha256(data).hexdigest()
+          binary = pathlib.Path(os.environ['RUNNER_TEMP']) / 'herdr-under-test'
+          binary.write_bytes(data)
+          binary.chmod(0o755)
+          PY
+      - name: Exercise real lazygit, fzf, and Herdr in a private test server
+        env:
+          HERDR_LAZYGIT_TEST_ARTIFACT_DIR: ${{ runner.temp }}/herdr-smoke-artifacts
+        run: |
+          "$RUNNER_TEMP/herdr-test-venv/bin/python" tests/client-screen-test.py
+          "$RUNNER_TEMP/herdr-test-venv/bin/python" tests/herdr-smoke-test.py "$RUNNER_TEMP/herdr-under-test"
+      - name: Retain isolated test diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: herdr-${{ matrix.herdr }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/herdr-smoke-artifacts
+          include-hidden-files: true

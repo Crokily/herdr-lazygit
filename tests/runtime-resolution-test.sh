@@ -18,7 +18,7 @@ cat > "$stub" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
   --print-config-dir) printf '%s\n' "${FAKE_USER_DIR:-}" ;;
-  --version) printf 'commit=x, build date=x, build source=binaryRelease, version=%s, os=darwin, arch=arm64, git version=2.50.1 (Apple Git-155)\n' "${FAKE_VERSION:-0.63.0}" ;;
+  --version) printf 'commit=x, build date=x, build source=binaryRelease, version=%s, os=darwin, arch=arm64, git version=2.50.1 (Apple Git-155)\n' "${FAKE_VERSION:-0.65.0}" ;;
   *)
     printf 'STUB_LG_CONFIG_FILE=%s\n' "${LG_CONFIG_FILE:-}"
     printf 'STUB_LAYOUT_FILE=%s\n' "${HERDR_LAZYGIT_LAYOUT_FILE:-}"
@@ -156,21 +156,28 @@ esac
 mkdir -p "$tmp/conf-override"
 printf "RUNTIME_LAZYGIT_BIN='%s'\n" "$stub" > "$tmp/conf-override/panel.conf"
 out_err="$tmp/override.err"
+status=0
 out="$(env HOME="$tmp/home" FAKE_USER_DIR="$user_dir" FAKE_VERSION=0.99.0 \
   HERDR_PLUGIN_ROOT="$repo_root" HERDR_PLUGIN_CONFIG_DIR="$tmp/conf-override" \
   HERDR_LAZYGIT_TEST_DECISION=1 HERDR_BIN_PATH=/usr/bin/false \
-  bash "$repo_root/scripts/open-lazygit.sh" 2>"$out_err")"
-case "$out" in
-  OPEN*) ;;
-  *)
-    echo "expected the launcher to proceed with a valid override, got: $out" >&2
-    exit 1
-    ;;
-esac
-if ! grep -q "0.99.0" "$out_err" || ! grep -q "0.63.0" "$out_err"; then
+  bash "$repo_root/scripts/open-lazygit.sh" 2>"$out_err")" || status=$?
+# The override passes precheck, but an unavailable Herdr must fail instead
+# of being mistaken for "no pane".
+[ "$status" -eq 1 ]
+grep -q 'pane current' "$out_err"
+
+if ! grep -q "0.99.0" "$out_err" || ! grep -q "0.65.0" "$out_err"; then
   echo "expected a version-mismatch notice naming both versions:" >&2
   cat "$out_err" >&2
   exit 1
 fi
+
+# Relative override paths cannot consistently resolve across launcher/pane cwd.
+printf "RUNTIME_LAZYGIT_BIN='relative/lazygit'\n" > "$tmp/conf-broken/panel.conf"
+status=0
+err="$(env HERDR_PLUGIN_ROOT="$repo_root" HERDR_PLUGIN_CONFIG_DIR="$tmp/conf-broken" \
+  HERDR_LAZYGIT_TEST_DECISION=1 bash "$repo_root/scripts/open-lazygit.sh" 2>&1)" || status=$?
+[ "$status" -eq 1 ]
+case "$err" in *'must be an absolute path'*) ;; *) exit 1 ;; esac
 
 echo "runtime resolution tests passed"

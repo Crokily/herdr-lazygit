@@ -50,7 +50,35 @@ type = "plugin_action"
 command = "herdr-lazygit.open-tab"
 ```
 
+Herdr 0.7.0 默认把 `prefix+shift+g` 分配给“新建 worktree”，且优先保留这个绑定。
+使用上面的插件键位时，请在已有的 `[keys]` 表中设置 `new_worktree = []`，或给该动作
+另选键位；否则 Herdr 会禁用插件的冲突绑定并显示配置警告。
+
 执行 `herdr server reload-config`。之后 `prefix+g` 的行为是：未打开 → 分屏打开；已打开但未聚焦 → 聚焦；已聚焦 → 关闭。
+
+新建分屏默认使用窄侧栏；新建独立 tab（`prefix+shift+g`）默认展开，直接显示 diff。
+如果已有匹配的 lazygit pane，快捷键会复用它，保留当前布局和位置；`open-tab` 也可能
+复用当前 workspace 中的分屏 pane。
+
+在设置页选择 **Initial Split Layout**、**Initial Tab Layout**，或在 `panel.conf` 中设置
+`DEFAULT_MODE_SPLIT=sidebar`、`DEFAULT_MODE_TAB=expanded`。两者分别接受 `sidebar`、
+`expanded`，非法值会告警并回退到对应默认值。只影响新建 pane；要保留以前的 tab
+初始布局，可设置 `DEFAULT_MODE_TAB=sidebar`。展开的分屏使用 `EXPAND_COLS`，并为相邻区域
+留出空间；独占 tab 保持整页宽度。若最终的 `lazygit-user.yml` 明确覆盖这些 GUI 字段，
+仍以用户配置为准。
+
+连续按 `U` 可在侧栏与展开布局之间切换。即使焦点一直停留在 lazygit，每次按键也会
+立即重新加载布局。
+
+Herdr 0.9 的插件 pane 接口只更新服务端焦点，未必切换可见客户端，因此新建或跨 tab
+复用时会显式调用 `tab focus`。这个公开接口作用于整个 session：连接同一服务端的其他
+客户端也可能切换。插件 action context 没有客户端 ID，目前无法保证只切换触发快捷键
+的那个客户端。重复触发仍会复用同一仓库已有的 Git pane。
+
+启动失败会在 `herdr plugin log list --plugin herdr-lazygit` 中记录阶段与原因，并尝试显示
+一条无声的 Herdr 通知。等锁最多 2 秒，单条命令最多 3 秒，launcher 总预算 10 秒
+（另加最多 0.5 秒通知时间）。不同服务端或 workspace 不互相阻塞。
+创建请求超时后，pane 可能已经建立，请先查看再重试；不要通过删除锁文件或批量杀进程恢复。
 
 ### Herdr Remote
 
@@ -98,9 +126,13 @@ herdr --remote <host> --remote-keybindings server
 - **AI 模型**：按后端分别设置。默认值分别是 claude 用 `haiku`、opencode 用 `google/gemini-2.5-flash`、gemini 用 `gemini-2.5-flash`、codex 用 Codex CLI 当前配置的默认模型。若你想把 codex 固定到某个模型，请设置 `AI_CODEX_MODEL`；
 - **AI Prompt**：用 `$EDITOR` 打开 prompt 文件，修改它可以改变生成 message 的语言和格式；
 - **键位**：按下新键即可重映射 `C` / `U` / `;`。与 lazygit 内置键冲突时会被拒绝，并显示被哪个绑定占用；
+- **初始布局**：分别选择新分屏、新 tab 使用 sidebar 或 expanded；
 - **宽度**：侧栏、展开布局、commit pane 的列宽。
 
-改动在 lazygit pane 重新获得焦点时生效——lazygit 在 focus 时热重载配置文件，无需重启。
+键位改动在 lazygit pane 重新获得焦点时生效。初始布局设置只影响新建 pane；当前 pane
+使用 `U` 切换。手写键位在运行时升级后发生冲突时，生成器会告警并选择空闲的插件键，
+设置页会同时显示实际键位与保存的偏好，不会禁用原生键或改写 `keys.conf`；默认 `C` 的
+已说明例外保留。冲突分析针对运行时的默认键表，个人 YAML 重映射仍由用户控制。
 
 ![设置页](docs/media/settings.png)
 
@@ -118,11 +150,11 @@ herdr --remote <host> --remote-keybindings server
 
 ## Runtime 与高级安装
 
-通过 GitHub 安装时，插件会下载固定版本的私有 lazygit 0.63.0 与 fzf 0.74.0，用仓库内固定的 SHA-256 校验值验证后存入 Herdr 管理的插件 `bin/` 目录。安装过程不会调用 Homebrew、系统包管理器或 `sudo`。
+通过 GitHub 安装时，插件会下载固定版本的私有 lazygit 0.65.0 与 fzf 0.74.4，用仓库内固定的 SHA-256 校验值验证后存入 Herdr 管理的插件 `bin/` 目录。安装过程不会调用 Homebrew、系统包管理器或 `sudo`。
 
 ### 为什么自带一份 lazygit？
 
-插件生成的 lazygit 配置（customCommands、键位、布局）是针对 lazygit 0.63.0 精确测试的，settings 菜单依赖 fzf 0.74.0 的特性。钉住私有副本意味着同一插件版本在每台机器上的行为一致，没装过 lazygit 的用户也能零副作用地获得可用的面板。私有二进制不进入 `PATH`，与 Homebrew 或发行版安装的 lazygit 互不干扰。
+插件生成的 lazygit 配置（customCommands、键位、布局）是针对 lazygit 0.65.0 精确测试的，settings 菜单依赖 fzf 0.74.4 的特性。钉住私有副本意味着同一插件版本在每台机器上的行为一致，没装过 lazygit 的用户也能零副作用地获得可用的面板。私有二进制不进入 `PATH`，与 Homebrew 或发行版安装的 lazygit 互不干扰。
 
 ### 你已有的 lazygit 配置
 
@@ -159,15 +191,18 @@ cd /path/to/herdr-lazygit
 herdr plugin link "$PWD"
 ```
 
-> **注意（herdr 平台行为）**：action 的上下文永远取自 herdr 当前 **UI 聚焦**的 pane，而不是后台进程。它会把 lazygit 开在用户聚焦 pane 旁边、使用该 pane 的 cwd，并聚焦新 pane。只通过前台键位绑定触发这两个 action。
+> **动作上下文**：前台快捷键捕获触发时的 pane 和 cwd。即使其他客户端随后改变焦点，
+> launcher 仍使用原目标；来源 pane 被移动或关闭时会报错，不会开到其他位置。
+> 手动调用且未提供 action context 时，只查询一次当前 pane。远程使用时应在 pane 所在
+> 主机运行插件；在 UI 中切换机器不会改变 pane 继承的 socket。
 
 ## 细节备查
 
 ### 键位细节
 
 - `C` 只读取 **staged** 内容——先 stage 再按。它覆盖了 files 面板内置的「用 git editor 提交」键位；如果需要该功能，在 `lazygit-user.yml` 里重新绑定。每个 tab 同时只有一个 `GitCommit` pane。
-- `U` 是全局键位，切换当前 pane 自己的布局层： `sidebar` 与 `expanded`。展开宽度默认 110 列，上限为 tab 总宽减 20。每个新 pane 都从侧栏模式开始，其他 pane 保持自己的模式不变。
-- `U` 和 `;` 是对 lazygit 0.63.0 全部内置键位做空闲键分析得出的默认值：候选 `Z` 被 `universal.redo` 占用；`Ctrl+S` 和 `O` 分别与过滤菜单、PR 菜单冲突；`U` 和 `;` 在所有面板均无绑定（完整占用矩阵见 [DESIGN.md](DESIGN.md) 附录 A）。选键规则：插件键位不遮蔽 lazygit 常用内置键。`v`（范围选择）和 `V`（cherry-pick 粘贴）因此保持原生。
+- `U` 是全局键位，切换当前 pane 自己的布局层： `sidebar` 与 `expanded`。展开宽度默认 110 列，上限为 tab 总宽减 20。新分屏默认侧栏、新 tab 默认展开；其他 pane 保持自己的模式不变。
+- `U` 和 `;` 是对 lazygit 0.65.0 全部内置键位做空闲键分析得出的默认值：候选 `Z` 被 `universal.redo` 占用；`Ctrl+S` 和 `O` 分别与过滤菜单、PR 菜单冲突；`U` 和 `;` 在所有面板均无绑定（完整占用矩阵见 [DESIGN.md](DESIGN.md) 附录 A）。选键规则：插件键位不遮蔽 lazygit 常用内置键。`v`（范围选择）和 `V`（cherry-pick 粘贴）因此保持原生。
 - 键位持久化在 `$HERDR_PLUGIN_CONFIG_DIR/keys.conf`。
 
 ### AI 后端配置文件
@@ -210,8 +245,11 @@ docs/media/                  # 本 README 实际引用的最终媒体
 scripts/
   install-runtime.sh         # 安装时下载并校验私有 runtime
   runtime-versions.sh        # 固定的 lazygit/fzf 版本
+  launcher.py                # 带时限的分屏/tab 共享启动逻辑
+  launcher-config.sh         # shell 配置和运行时预检
+  process_helper.py          # 子命令时限与进程组清理
   runtime-env.sh             # 用绝对路径解析 runtime 工具
-  run-lazygit.sh             # pane 入口：重新生成配置层后 exec lazygit
+  run-lazygit.sh             # pane 入口：重新生成配置层后运行 lazygit
   open-lazygit.sh            # action：分屏打开(幂等 open/focus/toggle)
   open-lazygit-tab.sh        # action:tab 打开
   ai-commit-msg.sh           # AI commit message 生成 / 后端与模型管理
@@ -231,7 +269,7 @@ tests/                       # installer、runtime、launcher、layout 与 AI �
 
 ```
 keys.conf                    # 插件键位：KEY_COMMIT / KEY_ZOOM / KEY_SETTINGS
-panel.conf                   # 全局 pane 宽度 + 可选的 INHERIT_USER_CONFIG / RUNTIME_* 覆盖
+panel.conf                   # 分屏/tab 初始布局、宽度，以及可选的 INHERIT_USER_CONFIG / RUNTIME_* 覆盖
 ai-backend.conf              # AI 后端 / 各后端模型
 prompt.txt                   # 自定义 AI commit prompt
 generated.yml                # 机器生成的全局 lazygit 配置层——勿手改

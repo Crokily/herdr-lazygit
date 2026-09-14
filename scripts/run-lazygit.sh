@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pane entrypoint: assemble the layered lazygit configuration, then exec lazygit.
+# Pane entrypoint: assemble the layered lazygit configuration, then run lazygit.
 #
 # Config layering (verified against lazygit's docs/Config.md: LG_CONFIG_FILE
 # accepts a comma-separated list of config files, later files merged over
@@ -13,7 +13,7 @@
 #      scripts/gen-config-layer.sh from keys.conf (plugin customCommands:
 #      AI commit / expand / settings); regenerated before every launch
 #   3. $HERDR_PLUGIN_CONFIG_DIR/layout-*.yml     — per-pane layout layer
-#      created here (sidebar by default, expanded after KEY_ZOOM)
+#      created here with the launcher's initial mode, then changed by KEY_ZOOM
 #   4. $HERDR_PLUGIN_CONFIG_DIR/lazygit-user.yml — the user's override layer,
 #      created empty (comments only) on first run; survives plugin updates
 #      and always wins.
@@ -47,7 +47,12 @@ panel_conf="$config_dir/panel.conf"
 herdr_lazygit_cleanup_stale_layout_layers "$config_dir"
 layout_epoch="$(date +%s 2>/dev/null || printf '0')"
 layout_file="$config_dir/layout-$$-$layout_epoch.yml"
-herdr_lazygit_write_layout_layer "$layout_file" "sidebar"
+initial_mode="${HERDR_LAZYGIT_INITIAL_MODE:-sidebar}"
+case "$initial_mode" in
+  sidebar|expanded) ;;
+  *) printf 'herdr-lazygit: invalid initial layout; using sidebar.\n' >&2; initial_mode=sidebar ;;
+esac
+herdr_lazygit_write_layout_layer "$layout_file" "$initial_mode"
 export HERDR_LAZYGIT_LAYOUT_FILE="$layout_file"
 
 user_config="$config_dir/lazygit-user.yml"

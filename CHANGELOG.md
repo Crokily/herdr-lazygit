@@ -7,6 +7,10 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ### Added
 
+- Independent **Initial Split Layout** / **Initial Tab Layout** settings
+  (`DEFAULT_MODE_SPLIT` / `DEFAULT_MODE_TAB`), applying only to newly opened panes.
+- Stateful launcher regressions and an isolated real-Herdr/runtime smoke test.
+- Windows contribution review and a staged CI plan; Windows support remains unclaimed.
 - Copy-ready AI-agent installation prompts in the English and Chinese quick
   starts, with idempotent config editing, conflict handling, reload, and
   verification instructions.
@@ -15,6 +19,13 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ### Changed
 
+- New tabs start expanded with the diff visible; splits still start in sidebar
+  mode. Reused panes keep their layout and placement. Set `DEFAULT_MODE_TAB=sidebar`
+  to retain the old tab default.
+- Private runtime updated to lazygit 0.65.0 and fzf 0.74.4, with all eight
+  macOS/Linux archive digests refreshed and verified.
+- Conflicting handwritten plugin keys use free alternatives, with a warning
+  and effective bindings shown in Settings, instead of disabling native keys.
 - Moved the normal manual install and keybinding setup ahead of the feature
   tour; advanced runtime, mirror, and linked-checkout details now have their
   own section.
@@ -22,6 +33,31 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
   core lazygit sidebar.
 - Made `demo/launch-stage.sh` executable and renamed the CI job display title
   to cover the full test suite.
+
+### Fixed
+
+- Git tab creation and cross-tab reuse explicitly publish tab focus to Herdr
+  0.9 clients instead of trusting server-side `focused=true`. This uses Herdr's
+  session-wide public tab focus; client-local focus remains an upstream boundary.
+- Expand sends focus-out/focus-in together, so an already-focused lazygit reloads
+  the layout on consecutive toggles. Rendering regressions now assert visible
+  diff content and actual client switching through the configured keybinding.
+- Normalize bootstrap script aliases for reuse, and compare canonical paths in
+  launcher tests so macOS `/var` and `/private/var` aliases do not cause failures.
+- Document Herdr 0.7.0's default new-worktree key conflict and how to free
+  `prefix+shift+g` for the plugin tab action.
+- Handle partially repainted wide characters in the CI terminal screen reader,
+  avoiding a pyte crash while retaining visible-client and diff assertions.
+- Launchers share a non-inherited OS lock per user/server/workspace, use bounded
+  commands without pipe-EOF waits, and report failures in logs and a best-effort
+  Herdr notification. Query errors no longer masquerade as absent panes; failed
+  mutations are not retried automatically.
+- Split/tab actions retain their invoking pane/workspace instead of taking a
+  later UI focus as the target. Cross-tab reuse focuses the matching Git pane.
+- Layout RPC/CLI operations have deadlines, and initial expanded splits use
+  the configured width while leaving room for the sibling region.
+- Herdr 0.7.0 resizes through the existing `pane.resize` API when the absolute
+  ratio method is unavailable, preserving terminals and the declared minimum.
 
 ### Removed
 

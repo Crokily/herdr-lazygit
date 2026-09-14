@@ -14,17 +14,15 @@
 # shell-sourceable). Missing files/values use defaults:
 #   KEY_COMMIT=C   KEY_ZOOM=U   KEY_SETTINGS=';'
 # (U and ';' come from scripts/free-keys.py's free-key analysis of built-in
-# lazygit 0.63.0 bindings: Z is occupied by universal.redo, <c-s> by
+# lazygit 0.65.0 bindings: Z is occupied by universal.redo, <c-s> by
 # universal.filteringMenu, and O by branches.viewPullRequestOptions; U and ';'
 # are unused in every panel.)
 #
 # Output: generated.yml containing
 #   - customCommands: KEY_COMMIT (opens AI commit pane), KEY_ZOOM (global,
 #     toggles layout), and KEY_SETTINGS (global, calls open-settings-pane.sh)
-#   - keybinding: conditional <disabled> compatibility for old handwritten
-#     KEY_SETTINGS configurations. KEY_ZOOM / KEY_SETTINGS are now global;
-#     Settings rejects any panel conflict through free-keys.py check. The
-#     defaults U / ';' are unused everywhere, so this section is normally absent.
+# Conflicting keys fall back to free plugin keys. Never disable built-in keys
+# or rewrite keys.conf; the generated header records effective bindings.
 #
 # Idempotent and millisecond-scale: skip when generated.yml is newer than
 # keys.conf, this script, and free-keys.py. Writes use tmp+mv so lazygit's hot
@@ -100,7 +98,7 @@ valid_key "$k_settings" || { warn_bad_key KEY_SETTINGS "$k_settings" "$def_setti
 # The lazygit version participates in the marker because built-in key conflicts
 # can change between releases. Script/runtime mtimes also invalidate a persisted
 # generated layer after a plugin reinstall or local runtime rebuild.
-marker="# keys: $k_commit $k_zoom $k_settings | lazygit: $LAZYGIT_VERSION"
+marker="# requested-keys: $k_commit $k_zoom $k_settings | lazygit: $LAZYGIT_VERSION"
 if [ -f "$out" ] \
    && grep -qxF "$marker" "$out" 2>/dev/null \
    && [ ! "$self" -nt "$out" ] \
@@ -110,38 +108,25 @@ if [ -f "$out" ] \
   exit 0
 fi
 
+# Analyze the actual runtime once for all three keys. Known defaults remain
+# usable if an absent/broken override cannot print its configuration.
+resolve_status=0
+resolved="$(python3 "$script_dir/free-keys.py" resolve "$k_commit" "$k_zoom" "$k_settings")" || resolve_status=$?
+case "$resolve_status" in
+  0) eval "$resolved" ;;
+  2)
+    printf 'herdr-lazygit: key analysis unavailable; using tested default keys C, U, ;.\n' >&2
+    k_commit="$def_commit"; k_zoom="$def_zoom"; k_settings="$def_settings"
+    ;;
+  *) exit "$resolve_status" ;;
+esac
+
 # Escape YAML single quotes ('' represents one ').
 yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
 
 qc="$(yaml_quote "$k_commit")"
 qz="$(yaml_quote "$k_zoom")"
 qs="$(yaml_quote "$k_settings")"
-
-# --- Panel-level KEY_SETTINGS conflicts → <disabled> ------------------------
-# free-keys.py check outputs "<ctx>\t<section>.<action>". Ignore the universal
-# section (global custom already overrides global built-in), disabling only
-# same-key built-ins in panel sections. If free-keys.py is unavailable (exit 2),
-# skip silently; the file must still be generated.
-kb_section=""
-if command -v python3 >/dev/null 2>&1; then
-  conflicts="$(python3 "$script_dir/free-keys.py" check "$k_settings" global 2>/dev/null || true)"
-  if [ -n "$conflicts" ]; then
-    kb_section="$(printf '%s\n' "$conflicts" | awk -F'\t' '
-      {
-        n = split($2, a, ".")
-        if (n != 2 || a[1] == "universal") next
-        if (!(a[1] in seen)) { order[++cnt] = a[1]; seen[a[1]] = 1 }
-        acts[a[1]] = acts[a[1]] "    " a[2] ": <disabled>\n"
-      }
-      END {
-        if (cnt == 0) exit
-        printf "\n# KEY_SETTINGS(%s) conflicts with these panel built-ins; disabled as needed\n", KEY
-        printf "# (to restore them, choose an unused key in Settings)\n"
-        printf "keybinding:\n"
-        for (i = 1; i <= cnt; i++) printf "  %s:\n%s", order[i], acts[order[i]]
-      }' KEY="$k_settings")"
-  fi
-fi
 
 # --- Generate ----------------------------------------------------------------
 tmp="$out.tmp.$$"
@@ -153,6 +138,7 @@ EOF
   # overrides and lazygit runtime upgrades.
   printf '# keys: %s %s %s | lazygit: %s\n' \
     "$k_commit" "$k_zoom" "$k_settings" "$LAZYGIT_VERSION"
+  printf '%s\n' "$marker"
   cat <<'EOF'
 #
 # Change keys through Settings (press the Settings key in lazygit), or edit
@@ -193,6 +179,5 @@ EOF
       sh -c 'bash "$HERDR_LAZYGIT_ROOT/scripts/open-settings-pane.sh"'
 EOF
 
-  [ -n "$kb_section" ] && printf '%s\n' "$kb_section"
 } > "$tmp"
 mv "$tmp" "$out"

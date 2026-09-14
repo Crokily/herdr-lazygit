@@ -18,7 +18,7 @@ platforms = ["linux", "macos"]
 command = ["/bin/sh", "scripts/install-runtime.sh"]
 
 # The lazygit pane. The [[actions]] below summon it; run-lazygit.sh assembles the
-# layered LG_CONFIG_FILE (bundled config + user override) and then execs lazygit.
+# layered LG_CONFIG_FILE (bundled config + user override) and then runs lazygit.
 [[panes]]
 id = "lazygit"
 title = "Git"

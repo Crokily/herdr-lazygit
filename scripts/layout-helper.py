@@ -25,28 +25,52 @@ import os
 import socket
 import subprocess
 import sys
+import time
+
+from process_helper import run_command
+
+ABSOLUTE_RATIO_SUPPORTED = True
+
+
+class RpcError(RuntimeError):
+    def __init__(self, method, error):
+        self.error = error
+        super().__init__("{}: {}".format(method, error))
 
 
 def rpc(method, params):
-    s = socket.socket(socket.AF_UNIX)
-    s.connect(os.environ["HERDR_SOCKET_PATH"])
-    s.sendall((json.dumps({"id": "layout-helper", "method": method, "params": params}) + "\n").encode())
-    buf = b""
-    while not buf.endswith(b"\n"):
-        chunk = s.recv(65536)
-        if not chunk:
-            break
-        buf += chunk
+    deadline = time.monotonic() + 3.0
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(3.0)
+        s.connect(os.environ["HERDR_SOCKET_PATH"])
+        s.sendall((json.dumps({"id": "layout-helper", "method": method, "params": params}) + "\n").encode())
+        buf = b""
+        while not buf.endswith(b"\n"):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("layout request timed out")
+            s.settimeout(remaining)
+            chunk = s.recv(65536)
+            if not chunk:
+                raise ValueError("incomplete layout response")
+            buf += chunk
+            if len(buf) > 2 * 1024 * 1024:
+                raise ValueError("layout response is too large")
     resp = json.loads(buf.decode())
     if "error" in resp:
-        raise SystemExit(f"layout-helper: {method}: {resp['error']}")
+        raise RpcError(method, resp['error'])
     return resp["result"]
 
 
 def cli(*args):
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-    out = subprocess.run([herdr, *args], capture_output=True, text=True)
-    return json.loads(out.stdout)["result"]
+    out = run_command([herdr, *args])
+    if out.returncode:
+        raise ValueError(out.stderr.strip() or "Herdr command failed")
+    response = json.loads(out.stdout)
+    if response.get("error"):
+        raise ValueError(str(response["error"]))
+    return response["result"]
 
 
 def load(pane_id):
@@ -94,6 +118,54 @@ def nearest_right_split(tree, path):
     return None
 
 
+def set_ratio(pane, tree, rects, path, ratio):
+    """Set one split, with a non-destructive Herdr 0.7.0 fallback.
+
+    0.7.0 has layout.export and pane.resize, but no layout.set_split_ratio.
+    Never use layout.apply here: it recreates terminals and closes the old tab.
+    """
+    global ABSOLUTE_RATIO_SUPPORTED
+    if ABSOLUTE_RATIO_SUPPORTED:
+        try:
+            result = rpc("layout.set_split_ratio", {"pane_id": pane, "path": list(path), "ratio": ratio})
+            root = result.get("layout", {}).get("root")
+            return float(node_at(root, path)["ratio"]) if root else ratio
+        except RpcError as error:
+            detail = error.error
+            if not (isinstance(detail, dict) and detail.get("code") == "invalid_request"
+                    and "unknown variant `layout.set_split_ratio`" in detail.get("message", "")):
+                raise
+            # An explicit unknown-method rejection guarantees no mutation was
+            # applied. Transport errors and timeouts never trigger a retry.
+            ABSOLUTE_RATIO_SUPPORTED = False
+
+    split = node_at(tree, path)
+    current = float(split["ratio"])
+    desired = max(0.1, min(0.9, ratio))  # 0.7.0's ratio limit
+    delta = desired - current
+    if abs(delta) < 0.00001:
+        return desired
+    # pane.resize moves the nearest divider on the requested side. To move
+    # THIS divider right, pick a leaf on the first subtree's right edge; to
+    # move it left, use a leaf on the second subtree's left edge. This also
+    # reaches an outer region divider when Git has a temporary support pane.
+    direction = "right" if delta > 0 else "left"
+    subtree = split["first" if delta > 0 else "second"]
+    leaves = [p for p in pane_ids(subtree) if p in rects]
+    if not leaves:
+        raise ValueError("no pane on the target split boundary")
+    if delta > 0:
+        target = max(leaves, key=lambda p: rects[p]["x"] + rects[p]["width"])
+    else:
+        target = min(leaves, key=lambda p: rects[p]["x"])
+    remaining = abs(delta)
+    while remaining > 0.00001:
+        amount = min(0.5, remaining)  # pane.resize caps each step at 0.5
+        rpc("pane.resize", {"pane_id": target, "direction": direction, "amount": amount})
+        remaining -= amount
+    return desired
+
+
 def set_subtree_width(pane_id, tree, rects, path, cols):
     """Make the subtree on `path`'s side of its nearest right-split ancestor
     exactly `cols` wide."""
@@ -102,18 +174,23 @@ def set_subtree_width(pane_id, tree, rects, path, cols):
         return False  # pane spans the full tab width already
     split_path, is_second = hit
     split_w = subtree_width(node_at(tree, split_path), rects)
-    if split_w <= 0 or cols >= split_w:
+    if split_w <= 20:
         return False
+    # The sibling region keeps at least 20 columns, including for an initially
+    # expanded split inside a nested layout. A single-pane tab has no split.
+    cols = max(1, min(cols, split_w - 20))
     ratio = 1 - cols / split_w if is_second else cols / split_w
-    rpc("layout.set_split_ratio",
-        {"pane_id": pane_id, "path": list(split_path), "ratio": ratio})
-    return True
+    actual_ratio = set_ratio(pane_id, tree, rects, split_path, ratio)
+    return split_w * (1 - actual_ratio if is_second else actual_ratio)
 
 
 def main():
     cmd = sys.argv[1]
 
-    if cmd == "set-width":
+    if cmd == "tab-width":
+        print(int(cli("pane", "layout", "--pane", sys.argv[2])["layout"]["area"]["width"]))
+
+    elif cmd == "set-width":
         pane, cols = sys.argv[2], int(sys.argv[3])
         tree, rects = load(pane)
         path = find_path(tree, pane)
@@ -132,12 +209,13 @@ def main():
         # 1. grow the region to git+diff columns (its parent yields the space);
         #    impossible when the region already spans the tab (sidebar in its
         #    own tab) — then the diff simply gets the remaining width
-        grown = set_subtree_width(git, tree, rects, s_path, git_cols + diff_cols)
-        region_w = (git_cols + diff_cols) if grown else subtree_width(region, rects)
+        grown_width = set_subtree_width(git, tree, rects, s_path, git_cols + diff_cols)
+        region_w = grown_width or subtree_width(region, rects)
         # 2. divide the region: git left, diff right
-        rpc("layout.set_split_ratio",
-            {"pane_id": git, "path": list(s_path),
-             "ratio": min(git_cols / region_w, 0.9)})
+        # An outer resize changed the rectangle sizes. Reload before selecting
+        # the divider for the inner split (also needed by the 0.7.0 fallback).
+        tree, rects = load(git)
+        set_ratio(git, tree, rects, s_path, min(git_cols / region_w, 0.9))
 
     elif cmd == "set-region-width":
         git, cols = sys.argv[2], int(sys.argv[3])
@@ -153,4 +231,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, RpcError, subprocess.TimeoutExpired) as error:
+        raise SystemExit("layout-helper: {}".format(error))

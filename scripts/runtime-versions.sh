@@ -3,5 +3,5 @@
 # generated configuration and key-conflict analysis are tested against this
 # lazygit release, and the commit/settings UI relies on fzf features from this
 # release.
-LAZYGIT_VERSION='0.63.0'
-FZF_VERSION='0.74.0'
+LAZYGIT_VERSION='0.65.0'
+FZF_VERSION='0.74.4'

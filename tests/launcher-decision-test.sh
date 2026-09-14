@@ -72,20 +72,35 @@ write_process_info() {
 EOF
 }
 
-make_context_json() {
-  python3 -c 'import json, sys; print(json.dumps({"focused_pane_cwd": sys.argv[1]}))' "$1"
-}
-
 run_decision() {
   local script=$1 target_dir=$2 panes_file=$3 current_file=$4 process_dir=$5
+  # Supply a real action context and its live source pane. The fixture's
+  # focused bit selects the invocation source only while building this input;
+  # launcher.py must not consult focused bits after the action was triggered.
+  python3 - "$panes_file" "$current_file" "$target_dir" "$tmp" <<'PYFIXTURE'
+import json, pathlib, sys
+panes=json.load(open(sys.argv[1]))['result']['panes']
+current=json.load(open(sys.argv[2]))['result']['pane']
+source=next((p for p in panes if p.get('focused') and p['tab_id']==current['tab_id']), None)
+if source is None:
+    source=dict(current, pane_id='source-pane', cwd=sys.argv[3], label='Shell')
+    panes.append(source)
+root=pathlib.Path(sys.argv[4])
+(root/'prepared-panes.json').write_text(json.dumps({'result':{'panes':panes}}))
+(root/'prepared-context.json').write_text(json.dumps({
+    'workspace_id':source['workspace_id'], 'tab_id':source['tab_id'],
+    'focused_pane_id':source['pane_id'], 'focused_pane_cwd':sys.argv[3]}))
+PYFIXTURE
   env \
     HERDR_BIN_PATH="$fake_herdr" \
     HERDR_LAZYGIT_BIN=/usr/bin/true \
     HERDR_PLUGIN_ROOT="$repo_root" \
     HERDR_PLUGIN_CONFIG_DIR="$tmp/config" \
+    HERDR_PLUGIN_STATE_DIR="$tmp/state" \
+    HERDR_SOCKET_PATH="$tmp/herdr.sock" \
     HERDR_LAZYGIT_TEST_DECISION=1 \
-    HERDR_PLUGIN_CONTEXT_JSON="$(make_context_json "$target_dir")" \
-    FAKE_HERDR_PANES_JSON_FILE="$panes_file" \
+    HERDR_PLUGIN_CONTEXT_JSON="$(cat "$tmp/prepared-context.json")" \
+    FAKE_HERDR_PANES_JSON_FILE="$tmp/prepared-panes.json" \
     FAKE_HERDR_CURRENT_JSON_FILE="$current_file" \
     FAKE_HERDR_PROCESS_INFO_DIR="$process_dir" \
     bash "$script"

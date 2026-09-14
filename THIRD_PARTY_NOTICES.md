@@ -4,9 +4,9 @@
 Herdr-managed `bin/` directory during plugin installation. The binaries are not
 committed to this repository.
 
-## lazygit 0.63.0
+## lazygit 0.65.0
 
-Source: <https://github.com/jesseduffield/lazygit/tree/v0.63.0>
+Source: <https://github.com/jesseduffield/lazygit/tree/v0.65.0>
 
 MIT License
 
@@ -30,9 +30,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## fzf 0.74.0
+## fzf 0.74.4
 
-Source: <https://github.com/junegunn/fzf/tree/v0.74.0>
+Source: <https://github.com/junegunn/fzf/tree/v0.74.4>
 
 The MIT License (MIT)
 

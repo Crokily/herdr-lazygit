@@ -20,11 +20,9 @@
 #   Width           → read and validate a number, then write panel.conf
 #                     (blank = restore the default)
 #
-# Every change immediately writes the corresponding conf file and calls
-# gen-config-layer.sh to regenerate generated.yml (gracefully skipped if the
-# script is unavailable). lazygit 0.63+ hot-reloads all configuration files
-# when the terminal regains focus, so changes take effect when the user returns
-# to the lazygit pane without a restart.
+# Changes write the corresponding conf file. Key changes regenerate
+# generated.yml and take effect on focus return; initial-layout preferences
+# apply only to new panes and never rewrite a running pane's layout layer.
 #
 # Configuration files (all under $HERDR_PLUGIN_CONFIG_DIR and shell-sourceable):
 #   ai-backend.conf  AI_BACKEND / AI_<BACKEND>_MODEL / AI_CUSTOM_CMD
@@ -52,6 +50,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck disable=SC1091
 . "$script_dir/runtime-env.sh"
 herdr_lazygit_require_runtime fzf
+herdr_lazygit_version_notice fzf
 FZF_BIN="$HERDR_LAZYGIT_FZF_BIN"
 SELF="$script_dir/settings-fzf.sh"
 AI_SH="$script_dir/ai-commit-msg.sh"
@@ -89,12 +88,36 @@ load_confs() {
   AI_OPENCODE_MODEL="google/gemini-2.5-flash"; AI_GEMINI_MODEL="gemini-2.5-flash"
   KEY_COMMIT=""; KEY_ZOOM=""; KEY_SETTINGS=""
   SIDEBAR_COLS=""; EXPAND_COLS=""; COMMIT_COLS=""; SETTINGS_COLS=""
+  DEFAULT_MODE_SPLIT=""; DEFAULT_MODE_TAB=""
   # shellcheck disable=SC1090
   { [ -f "$AI_CONF" ] && . "$AI_CONF"; } || true
   # shellcheck disable=SC1090
   { [ -f "$KEYS_CONF" ] && . "$KEYS_CONF"; } || true
   # shellcheck disable=SC1090
   { [ -f "$PANEL_CONF" ] && . "$PANEL_CONF"; } || true
+}
+
+# The generated layer may use a safe fallback for a conflicting handwritten
+# key. Show the binding that actually works as well as the saved preference.
+effective_key() {
+  local var="$1" fallback="$2" marker c z s rest
+  marker="$(sed -n 's/^# keys: //p' "$CONFIG_DIR/generated.yml" 2>/dev/null | head -1)" || true
+  read -r c z s rest <<< "$marker" || true
+  case "$var" in
+    KEY_COMMIT) printf '%s' "${c:-$fallback}" ;;
+    KEY_ZOOM) printf '%s' "${z:-$fallback}" ;;
+    KEY_SETTINGS) printf '%s' "${s:-$fallback}" ;;
+  esac
+}
+
+preview_key() {
+  local var="$1" saved="$2" default="$3" active
+  active="$(effective_key "$var" "$default")"
+  printf 'Current: %s\n' "$active"
+  if [ -n "$saved" ] && [ "$saved" != "$active" ]; then
+    printf 'Saved preference: %s (a safe fallback is active)\n' "$saved"
+  fi
+  printf '\n'
 }
 
 # Resolve AI_BACKEND=auto using ai-commit-msg.sh's detection order.
@@ -168,6 +191,8 @@ AI Prompt
 Keybinding: Commit
 Keybinding: Expand
 Keybinding: Settings
+Initial Split Layout
+Initial Tab Layout
 Sidebar Width
 Expanded Width
 AI Commit Pane Width
@@ -214,16 +239,30 @@ cmd_preview() {
       fi
       ;;
     "Keybinding: Commit")
-      printf 'Current: %s\n\n' "${KEY_COMMIT:-${DEF_KEY_COMMIT}(plugin default)}"
+      preview_key KEY_COMMIT "$KEY_COMMIT" "$DEF_KEY_COMMIT"
       printf 'About: Starts the full AI commit-message flow in the files panel.\nThe default C shadows lazygit\x27s infrequently used "commit using git editor" action.\nfree-keys.py validates changes and rejects conflicts with built-in keys.\n'
       ;;
     "Keybinding: Expand")
-      printf 'Current: %s\n\n' "${KEY_ZOOM:-${DEF_KEY_ZOOM}(plugin default)}"
+      preview_key KEY_ZOOM "$KEY_ZOOM" "$DEF_KEY_ZOOM"
       printf 'About: Globally toggles lazygit between sidebar and expanded layouts.\nfree-keys.py validates changes and rejects conflicts with built-in keys.\n'
       ;;
     "Keybinding: Settings")
-      printf 'Current: %s\n\n' "${KEY_SETTINGS:-${DEF_KEY_SETTINGS}(plugin default)}"
+      preview_key KEY_SETTINGS "$KEY_SETTINGS" "$DEF_KEY_SETTINGS"
       printf 'About: Global key that opens this settings page.\nfree-keys.py validates changes and rejects conflicts with built-in keys.\n'
+      ;;
+    "Initial Split Layout"|"Initial Tab Layout")
+      local current default
+      if [ "$item" = "Initial Split Layout" ]; then
+        current="$DEFAULT_MODE_SPLIT"; default=sidebar
+      else
+        current="$DEFAULT_MODE_TAB"; default=expanded
+      fi
+      case "$current" in
+        sidebar|expanded) printf 'Current: %s\n\n' "$current" ;;
+        '') printf 'Current: %s (default)\n\n' "$default" ;;
+        *) printf 'Invalid value: %s; using %s\n\n' "$current" "$default" ;;
+      esac
+      printf 'Sidebar shows a compact file list. Expanded shows the full lazygit layout and diff.\nApplies to newly opened panes only. Existing panes keep their layout; use Expand to change them.\n'
       ;;
     "Sidebar Width")
       if [ -n "$SIDEBAR_COLS" ]; then
@@ -329,8 +368,7 @@ flow_key() {
   local var="$1" def="$2" label="$3"; shift 3
   local cur key notation out stty_saved
   load_confs
-  cur="$(eval "printf '%s' \"\$$var\"")"
-  cur="${cur:-$def}"
+  cur="$(effective_key "$var" "$def")"
   clear
   printf 'Change [Keybinding: %s]  (current: %s)\n\n' "$label" "$cur"
   printf 'Press a new key — letters, numbers, symbols, and Ctrl combinations (written as <c-x>) are supported.\n'
@@ -369,18 +407,23 @@ if len(b) == 1:
     MSG="Unsupported key; cancelled"
     return 0
   fi
-  # If the new key matches the current key, accept it without running check.
-  # This is part of free-keys.py's documented contract; otherwise accepted
-  # exceptions such as default C would be rejected by their own occupancy
-  # record and could never be restored.
-  if [ "$notation" = "$cur" ]; then
-    MSG="[Keybinding: $label] already uses $notation; no change"
-    return 0
-  fi
+  # Global plugin bindings also overlap the Commit binding in files. Reject
+  # duplicates before checking defaults; keep the documented C exception.
+  local other other_default
+  for other in KEY_COMMIT KEY_ZOOM KEY_SETTINGS; do
+    [ "$other" != "$var" ] || continue
+    case "$other" in KEY_COMMIT) other_default=C ;; KEY_ZOOM) other_default=U ;; *) other_default=';' ;; esac
+    if [ "$notation" = "$(effective_key "$other" "$other_default")" ]; then
+      MSG="[Keybinding: $label] rejected: $notation is used by another plugin action"
+      return 0
+    fi
+  done
   # Conflict validation: free-keys.py check KEY context... (nonzero means a
   # conflict or unavailable key).
   local check_note=""
-  if [ -f "$FREE_KEYS_PY" ]; then
+  if [ "$var" = KEY_COMMIT ] && [ "$notation" = C ]; then
+    : # The documented files.commitChangesWithEditor exception.
+  elif [ -f "$FREE_KEYS_PY" ]; then
     if out="$(python3 "$FREE_KEYS_PY" check "$notation" "$@" 2>&1)"; then
       :
     else
@@ -429,13 +472,32 @@ flow_width() {
   MSG="[$label] set to $val columns · $GEN_NOTE"
 }
 
+# Initial mode is a preference, not the running pane's current mode. Don't
+# regenerate config or rewrite any layout layer when this setting changes.
+flow_layout() {
+  local var="$1" label="$2" default="$3" selected
+  selected="$(printf 'Default (%s)\nsidebar\nexpanded\n' "$default" | "$FZF_BIN" \
+    --layout=reverse --no-multi --cycle --prompt="$label > " \
+    --header='Applies to new panes only · Enter = select · Esc = back' \
+    --bind 'double-click:accept')" || { MSG="Cancelled"; return 0; }
+  case "$selected" in
+    "Default ($default)") conf_del "$PANEL_CONF" "$var"; selected="$default (default)" ;;
+    sidebar|expanded)
+      seed_conf "$PANEL_CONF" "$PANEL_CONF_HEADER"
+      conf_set "$PANEL_CONF" "$var" "$selected"
+      ;;
+    *) MSG="Cancelled"; return 0 ;;
+  esac
+  MSG="[$label] $selected · Applies to new panes only"
+}
+
 # ---------------------------------------------------------------------------
 # Main-menu loop
 # ---------------------------------------------------------------------------
 main_menu() {
   local header item
   while true; do
-    header='Changes apply automatically when you return to the lazygit pane (hot reload)
+    header='Changes apply when you return; initial layouts apply to new panes only
 Enter/double-click = edit · Esc/q = exit'
     if [ -n "$MSG" ]; then
       header="$header
@@ -457,6 +519,8 @@ Enter/double-click = edit · Esc/q = exit'
       "Keybinding: Commit")   flow_key KEY_COMMIT "$DEF_KEY_COMMIT" "Commit" files ;;
       "Keybinding: Expand")   flow_key KEY_ZOOM "$DEF_KEY_ZOOM" "Expand" global ;;
       "Keybinding: Settings") flow_key KEY_SETTINGS "$DEF_KEY_SETTINGS" "Settings" global ;;
+      "Initial Split Layout") flow_layout DEFAULT_MODE_SPLIT "Initial Split Layout" sidebar ;;
+      "Initial Tab Layout") flow_layout DEFAULT_MODE_TAB "Initial Tab Layout" expanded ;;
       "Sidebar Width")
         load_confs
         flow_width SIDEBAR_COLS "Sidebar Width" "${SIDEBAR_COLS:-42 (default)}"

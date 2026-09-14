@@ -35,7 +35,7 @@ infrequently used commitChangesWithEditor action in the files panel (documented
 in DESIGN.md). Settings should therefore accept "new key == current key"
 without running check again.
 
-Analysis conclusions (lazygit 0.63.0, recorded in the DESIGN.md appendix):
+Analysis conclusions (lazygit 0.65.0, recorded in the DESIGN.md appendix):
   KEY_ZOOM (Expand/global): Z ✗ (universal.redo) → U ✓ (free in all panels) => default U
   KEY_SETTINGS: <c-s> ✗(universal.filteringMenu / confirmInEditor-alt)
                → O ✗(branches.viewPullRequestOptions)
@@ -44,8 +44,11 @@ Analysis conclusions (lazygit 0.63.0, recorded in the DESIGN.md appendix):
 
 import os
 import re
+import shlex
 import subprocess
 import sys
+
+from process_helper import run_command
 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 PRIVATE_LAZYGIT = os.path.join(PLUGIN_ROOT, "bin", "lazygit")
@@ -112,11 +115,10 @@ def load_bindings():
     """
     try:
         lazygit = os.environ.get("HERDR_LAZYGIT_BIN") or PRIVATE_LAZYGIT
-        out = subprocess.run(
-            [lazygit, "--config"],
-            capture_output=True, text=True, check=True,
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as e:
+        result = run_command([lazygit, "--config"])
+        result.check_returncode()
+        out = result.stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         sys.stderr.write("free-keys.py: unable to run the plugin lazygit runtime (%s); "
                          "run scripts/install-runtime.sh first\n" % e)
         sys.exit(2)
@@ -206,6 +208,45 @@ def cmd_check(argv):
     sys.exit(1 if conflict else 0)
 
 
+def cmd_resolve(keys):
+    """Choose safe effective plugin keys without editing user preferences.
+
+    Output quoted shell assignments; warnings go to stderr. Only the documented C
+    exception is allowed to shadow a default built-in. Global keys overlap
+    the files command too, so the three effective keys must be distinct.
+    """
+    if len(keys) != 3:
+        raise SystemExit(2)
+    bindings = load_bindings()
+    selected = []
+    defaults = ["C", "U", ";"]
+    names = ["KEY_COMMIT", "KEY_ZOOM", "KEY_SETTINGS"]
+    for index, requested in enumerate(keys):
+        contexts = ["files"] if index == 0 else ["global"]
+        def available(key):
+            if norm_key(key) in [norm_key(k) for k in selected]:
+                return False
+            occupied = []
+            for ctx in contexts:
+                for section in sections_for_context(bindings, ctx):
+                    occupied.extend(occupants(bindings, key, section))
+            if index == 0 and key == "C":
+                occupied = [o for o in occupied if o != ("files", "commitChangesWithEditor")]
+            return not occupied
+        candidates = [requested, defaults[index], ";", "U", ",", "X", "<f6>", "<f7>", "<f8>", "<f9>"]
+        chosen = next((key for key in candidates if available(key)), None)
+        if chosen is None:
+            sys.stderr.write("free-keys.py: no safe key available for {}\n".format(names[index]))
+            raise SystemExit(1)
+        if chosen != requested:
+            sys.stderr.write("herdr-lazygit: {}={} conflicts; using {}. "
+                             "Change it in Settings; keys.conf was preserved.\n".format(
+                                 names[index], requested, chosen))
+        selected.append(chosen)
+    for name, key in zip(("k_commit", "k_zoom", "k_settings"), selected):
+        print("{}={}".format(name, shlex.quote(key)))
+
+
 def first_free(bindings, candidates, contexts):
     """Find the first candidate free in all contexts; return (key, rejection notes)."""
     notes = []
@@ -266,6 +307,8 @@ def main():
         return
     if argv and argv[0] == "check":
         cmd_check(argv[1:])
+    elif argv and argv[0] == "resolve":
+        cmd_resolve(argv[1:])
     elif argv and argv[0] == "report":
         cmd_report(argv[1:])
     else:

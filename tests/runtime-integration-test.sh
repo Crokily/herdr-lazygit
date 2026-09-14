@@ -74,6 +74,7 @@ standalone_root="$tmp/standalone plugin"
 empty_path="$tmp/empty-path"
 mkdir -p "$standalone_root/scripts" "$standalone_root/bin" "$empty_path"
 cp "$repo_root/scripts/free-keys.py" "$standalone_root/scripts/"
+cp "$repo_root/scripts/process_helper.py" "$standalone_root/scripts/"
 cat > "$standalone_root/bin/lazygit" <<'EOF'
 #!/bin/sh
 printf '%s\n' \
@@ -114,17 +115,32 @@ EOF
 write_fake_lazygit ';'
 HERDR_LAZYGIT_ROOT="$runtime_root" HERDR_PLUGIN_CONFIG_DIR="$config_dir" \
   bash "$repo_root/scripts/gen-config-layer.sh"
-grep -q 'testAction: <disabled>' "$config_dir/generated.yml"
+grep -q '^# keys: C U , |' "$config_dir/generated.yml"
 
 # Ensure -nt observes a newer binary even on filesystems with second precision.
 sleep 1
 write_fake_lazygit X
 HERDR_LAZYGIT_ROOT="$runtime_root" HERDR_PLUGIN_CONFIG_DIR="$config_dir" \
   bash "$repo_root/scripts/gen-config-layer.sh"
-if grep -q 'testAction: <disabled>' "$config_dir/generated.yml"; then
+if ! grep -q '^# keys: C U ; |' "$config_dir/generated.yml"; then
   echo 'generated.yml retained a stale lazygit key conflict' >&2
   exit 1
 fi
-grep -q '| lazygit: 0.63.0$' "$config_dir/generated.yml"
+grep -q '| lazygit: 0.65.0$' "$config_dir/generated.yml"
+
+# Handwritten conflicts and duplicate plugin keys get effective alternatives;
+# native bindings and the user's saved preference remain intact.
+for settings_key in X U; do
+  printf "KEY_SETTINGS='%s'\n" "$settings_key" > "$config_dir/keys.conf"
+  before="$(cat "$config_dir/keys.conf")"
+  HERDR_LAZYGIT_ROOT="$runtime_root" HERDR_PLUGIN_CONFIG_DIR="$config_dir" \
+    bash "$repo_root/scripts/gen-config-layer.sh"
+  grep -q '^# keys: C U ; |' "$config_dir/generated.yml"
+  if grep -q '<disabled>' "$config_dir/generated.yml"; then exit 1; fi
+  [ "$before" = "$(cat "$config_dir/keys.conf")" ]
+done
+preview="$(HERDR_PLUGIN_CONFIG_DIR="$config_dir" HERDR_LAZYGIT_FZF_BIN=/usr/bin/true \
+  bash "$repo_root/scripts/settings-fzf.sh" preview 'Keybinding: Settings' 2>/dev/null)"
+case "$preview" in *'Current: ;'*'Saved preference: U'*) ;; *) exit 1 ;; esac
 
 printf 'runtime integration tests passed\n'
