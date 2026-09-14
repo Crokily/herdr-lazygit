@@ -48,6 +48,8 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
   `prefix+shift+g` for the plugin tab action.
 - Handle partially repainted wide characters in the CI terminal screen reader,
   avoiding a pyte crash while retaining visible-client and diff assertions.
+- Wait for asynchronous keybinding actions to finish before the smoke test
+  switches tabs again, avoiding a race with the launcher's final focus request.
 - Launchers share a non-inherited OS lock per user/server/workspace, use bounded
   commands without pipe-EOF waits, and report failures in logs and a best-effort
   Herdr notification. Query errors no longer masquerade as absent panes; failed
