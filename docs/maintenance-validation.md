@@ -1,7 +1,6 @@
 # Maintenance validation — 2026-09-13–14
 
-This branch keeps the manifest at its existing version until a release is
-chosen. It retains `min_herdr_version = "0.7.0"` and Linux/macOS platform support.
+This maintenance work is included in version 0.4.0. It retains `min_herdr_version = "0.7.0"` and Linux/macOS platform support.
 Windows is limited to the [contribution review and CI plan](windows-review.md).
 
 ## Evidence and boundaries

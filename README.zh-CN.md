@@ -33,7 +33,7 @@ AI commit message 所使用的 AI CLI 与插件安装是两回事。Git 侧栏�
 herdr plugin install crokily/herdr-lazygit
 
 # 或固定安装某个发布版本:
-herdr plugin install crokily/herdr-lazygit --ref v0.3.0
+herdr plugin install crokily/herdr-lazygit --ref v0.4.0
 ```
 
 在当前生效的 herdr `config.toml` 中添加启动键位：
