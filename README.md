@@ -33,7 +33,7 @@ Requires herdr >= 0.7.0 plus `bash`, `git`, and Python >= 3.7 (`python3`) on `PA
 herdr plugin install crokily/herdr-lazygit
 
 # or pin a released version:
-herdr plugin install crokily/herdr-lazygit --ref v0.3.0
+herdr plugin install crokily/herdr-lazygit --ref v0.4.0
 ```
 
 Add the launcher keybindings to your active herdr `config.toml`:

@@ -5,6 +5,8 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-14
+
 ### Added
 
 - Independent **Initial Split Layout** / **Initial Tab Layout** settings
@@ -167,6 +169,8 @@ Initial release.
   built-ins; key conflicts are rejected at settings time.
 - English and Chinese READMEs, DESIGN.md, and an automated demo GIF.
 
+[Unreleased]: https://github.com/Crokily/herdr-lazygit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Crokily/herdr-lazygit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Crokily/herdr-lazygit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Crokily/herdr-lazygit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Crokily/herdr-lazygit/compare/v0.1.0...v0.1.1
