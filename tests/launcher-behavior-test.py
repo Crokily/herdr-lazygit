@@ -67,6 +67,7 @@ elif args[:3] == ['plugin', 'pane', 'open']:
     if fault == 'open-timeout': time.sleep(30)
     print(json.dumps({'result': {'plugin_pane': {'pane':pane}}}))
 elif args[:3] in (['plugin','pane','focus'], ['plugin','pane','close']):
+    if fault == 'slow-focus': time.sleep(0.5)
     print(json.dumps({'result': {'success':True}}))
 elif args[:2] == ['tab','focus']:
     if fault == 'tab-focus-timeout': time.sleep(30)
@@ -137,6 +138,16 @@ class LauncherBehavior(unittest.TestCase):
     def calls(self):
         path = self.root/'calls'
         return [json.loads(line)['args'] for line in path.read_text().splitlines()] if path.exists() else []
+
+    def start_job(self, kind):
+        process = subprocess.Popen([sys.executable,'-c',DRIVER,kind], env=self.env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def cleanup():
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=3)
+        self.addCleanup(cleanup)
+        return process
 
     def last_open(self):
         return [c for c in self.calls() if c[:3] == ['plugin','pane','open']][-1]
@@ -309,23 +320,36 @@ class LauncherBehavior(unittest.TestCase):
         # Both actions can reuse a matching split. Concurrency must not turn
         # another client's focused bit into CLOSE, nor leak locks to commands.
         self.write_panes([self.source, self.git_pane(focused=True)])
-        jobs = [subprocess.Popen([sys.executable,'-c',DRIVER,kind], env=self.env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                for kind in ('split','tab')]
-        for process in jobs:
-            out, err = process.communicate(timeout=7)
-            self.assertEqual(process.returncode, 0, err)
+        # Hold focus longer than the test driver's 0.3s lock timeout. A busy
+        # response is valid; retry after both original jobs have finished.
+        self.env['FAKE_FAULT'] = 'slow-focus'
+        jobs = [self.start_job(kind) for kind in ('split','tab')]
+        results = [process.communicate(timeout=7) for process in jobs]
+        successes = 0
+        for kind, process, (out, err) in zip(('split','tab'), jobs, results):
+            if process.returncode == 0:
+                successes += 1
+            else:
+                self.assertEqual(process.returncode, 1, err)
+                self.assertIn(b'launcher lock failed', err)
+                self.assertIn(b'another lazygit action', err)
+                retry = self.invoke(kind)
+                self.assertEqual(retry.returncode, 0, retry.stderr)
+                self.assertTrue(retry.stdout.startswith('FOCUS'), retry.stdout)
+        self.assertGreaterEqual(successes, 1)
         self.assertEqual(sum(c[:3] == ['plugin','pane','focus'] for c in self.calls()), 2)
+        self.assertFalse(any(c[:3] in (['plugin','pane','open'], ['plugin','pane','close'])
+                             for c in self.calls()))
+        for line in (self.root/'calls').read_text().splitlines():
+            self.assertEqual(json.loads(line)['lock_fds'], [])
         self.assertEqual(len(list((self.root/'state'/'launcher-locks').glob('*.lock'))), 1)
 
     def test_concurrent_new_tabs_create_only_one_pane(self):
         self.env['FAKE_FAULT'] = 'bootstrap'
-        jobs = [subprocess.Popen([sys.executable,'-c',DRIVER,'tab'], env=self.env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                for _ in range(2)]
+        jobs = [self.start_job('tab') for _ in range(2)]
+        results = [process.communicate(timeout=7) for process in jobs]
         successes = 0
-        for process in jobs:
-            out, err = process.communicate(timeout=7)
+        for process, (out, err) in zip(jobs, results):
             if process.returncode == 0:
                 successes += 1
             else:

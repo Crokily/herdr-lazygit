@@ -5,6 +5,12 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
 
 ## [Unreleased]
 
+### Fixed
+
+- Concurrent launcher tests accept a bounded busy-lock response and verify
+  successful reuse on retry, including under deliberately delayed focus.
+  Test subprocesses and pipes are cleaned up even when an assertion fails.
+
 ## [0.4.0] - 2026-09-14
 
 ### Added
