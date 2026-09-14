@@ -46,6 +46,8 @@ Notable changes to the herdr-lazygit plugin. Versions track `version` in
   launcher tests so macOS `/var` and `/private/var` aliases do not cause failures.
 - Document Herdr 0.7.0's default new-worktree key conflict and how to free
   `prefix+shift+g` for the plugin tab action.
+- Handle partially repainted wide characters in the CI terminal screen reader,
+  avoiding a pyte crash while retaining visible-client and diff assertions.
 - Launchers share a non-inherited OS lock per user/server/workspace, use bounded
   commands without pipe-EOF waits, and report failures in logs and a best-effort
   Herdr notification. Query errors no longer masquerade as absent panes; failed

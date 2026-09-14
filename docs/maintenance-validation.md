@@ -120,10 +120,16 @@ tests and six geometry tests.
 The workflow runs the hermetic suites on Ubuntu/macOS and adds real runtime
 tests, including rendered client assertions, for all four Herdr versions on
 both platforms. Terminal emulation dependencies are isolated in a test venv;
-the plugin runtime still has no Python package dependencies. These hosted jobs
-have not been run from this local branch. Only Linux ARM64 binaries were
-executed locally; checksum verification is not execution evidence for the
-other architectures.
+the plugin runtime still has no Python package dependencies. The first hosted
+run passed nine of ten jobs. The macOS/Herdr 0.7.0 job failed inside pyte's
+screen reader: overwriting the first cell of a Chinese wide character can leave
+an empty continuation cell, which pyte 0.8.2's `display` indexes as a nonempty
+string. A minimal ANSI replay reproduces the same `IndexError` locally.
+The test adapter now renders orphan continuation cells as blanks, with
+regressions for partial repaints, intact wide/combining characters and cleared
+diff content. The existing visible-client assertions remain in place. Hosted
+results are tracked on PR #6. Only Linux ARM64 binaries were executed locally;
+checksum verification is not execution evidence for the other architectures.
 
 After testing the follow-up commit `bba1350`, the maintainer confirmed on
 September 14 that the fixes work in the reported macOS/Ghostty environment

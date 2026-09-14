@@ -22,11 +22,29 @@ import threading
 import time
 
 import pyte
+from wcwidth import wcwidth
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ClientScreen(pyte.Screen):
+    @property
+    def display(self):
+        # A partial repaint can overwrite the first half of a wide character
+        # while its empty continuation cell remains. pyte 0.8.2 indexes that
+        # empty string in Screen.display. Render orphan cells as blanks while
+        # still skipping the continuation of an intact wide character.
+        lines = []
+        for y in range(self.lines):
+            cells = []
+            x = 0
+            while x < self.columns:
+                value = self.buffer[y][x].data or ' '
+                cells.append(value)
+                x += max(1, wcwidth(value[0]))
+            lines.append(''.join(cells))
+        return lines
+
     def report_device_status(self, mode=0, **kwargs):
         # Herdr queries private terminal capabilities. The fixture emulates
         # rendered cells, not a physical terminal's capability replies. pyte

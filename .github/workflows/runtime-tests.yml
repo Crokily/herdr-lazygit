@@ -105,7 +105,9 @@ jobs:
       - name: Exercise real lazygit, fzf, and Herdr in a private test server
         env:
           HERDR_LAZYGIT_TEST_ARTIFACT_DIR: ${{ runner.temp }}/herdr-smoke-artifacts
-        run: '"$RUNNER_TEMP/herdr-test-venv/bin/python" tests/herdr-smoke-test.py "$RUNNER_TEMP/herdr-under-test"'
+        run: |
+          "$RUNNER_TEMP/herdr-test-venv/bin/python" tests/client-screen-test.py
+          "$RUNNER_TEMP/herdr-test-venv/bin/python" tests/herdr-smoke-test.py "$RUNNER_TEMP/herdr-under-test"
       - name: Retain isolated test diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
