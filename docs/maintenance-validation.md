@@ -133,6 +133,13 @@ Herdr versions ([CI run](https://github.com/Crokily/herdr-lazygit/actions/runs/3
 Only Linux ARM64 binaries were executed locally;
 checksum verification is not execution evidence for the other architectures.
 
+The post-merge run exposed a separate fixture race on Ubuntu/Herdr 0.7.5:
+Git rendered before the asynchronous keybinding action's final focus request
+completed. The fixture could switch back to its source tab too soon, then be
+switched away by the still-running action. Keyboard tests now wait for the
+new action log to report success before changing tabs, while still requiring
+actual rendered diff content. Failed actions remain test failures.
+
 After testing the follow-up commit `bba1350`, the maintainer confirmed on
 September 14 that the fixes work in the reported macOS/Ghostty environment
 with Herdr 0.9.0, including the tab-switch fix. This is maintainer-reported

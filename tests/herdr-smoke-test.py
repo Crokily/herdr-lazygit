@@ -268,16 +268,33 @@ def main():
             # Trigger the actual configured prefix+shift+g through the client
             # PTY. Neither focused=true nor a tab-bar label proves that the
             # client switched; require the diff content in the rendered grid.
+            def trigger_tab_key():
+                previous = {entry['log_id'] for entry in
+                            cli('plugin','log','list','--plugin','herdr-lazygit')['logs']}
+                os.write(master,b'\x02G')
+                def completed_action():
+                    for entry in cli('plugin','log','list','--plugin','herdr-lazygit')['logs']:
+                        if entry['log_id'] not in previous and entry['action_id'] == 'open-tab':
+                            if entry['status'] == 'failed':
+                                raise AssertionError(entry)
+                            if entry['status'] == 'succeeded':
+                                return True
+                    return False
+                # Rendering can precede the launcher's final tab.focus RPC.
+                # Wait for that action to finish before the test changes tabs,
+                # or its late focus can undo our next source-tab selection.
+                wait_for(completed_action, 'keybinding action completion')
+
             cli('tab','focus',other['tab_id'])
             cli('pane','run',other['pane_id'], "printf '\\nHLG_SOURCE_VIEW\\n'")
             wait_for(lambda:'HLG_SOURCE_VIEW' in visible_client(), 'source client view')
-            os.write(master,b'\x02G')
+            trigger_tab_key()
             git_pane = wait_for(lambda:next(iter(labeled('Git')),None), 'keybinding Git tab')['pane_id']
             wait_for(lambda:'+'+diff_text in visible_client(), 'keybinding visible Git diff')
             for _ in range(2):
                 cli('tab','focus',other['tab_id'])
                 wait_for(lambda:'HLG_SOURCE_VIEW' in visible_client(), 'source view before repeat')
-                os.write(master,b'\x02G')
+                trigger_tab_key()
                 wait_for(lambda:'+'+diff_text in visible_client(), 'repeated keybinding visible Git diff')
                 assert len(labeled('Git'))==1 and labeled('Git')[0]['pane_id']==git_pane
             cli('plugin','pane','close',git_pane)
