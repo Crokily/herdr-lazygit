@@ -71,6 +71,9 @@ Expanded splits use `EXPAND_COLS`, leaving space for the other pane; a
 single-pane tab always keeps its full width. Your final `lazygit-user.yml`
 layer still wins if it explicitly overrides the layout's GUI fields.
 
+Press `U` repeatedly to switch between sidebar and expanded layouts. Each
+keypress reloads the layout immediately, including while lazygit stays focused.
+
 On Herdr 0.9, opening or switching to a Git tab uses an explicit `tab focus`
 to update the visible client, because the plugin pane APIs alone only update
 server focus. Herdr's public tab focus is session-wide: other clients attached

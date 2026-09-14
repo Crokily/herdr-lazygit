@@ -125,8 +125,10 @@ have not been run from this local branch. Only Linux ARM64 binaries were
 executed locally; checksum verification is not execution evidence for the
 other architectures.
 
-The follow-up tab-switch fix still needs macOS/Ghostty verification. The Mac
-tester verified the paired-focus `U` fix, not this subsequent tab-focus change.
+After testing the follow-up commit `bba1350`, the maintainer confirmed on
+September 14 that the fixes work in the reported macOS/Ghostty environment
+with Herdr 0.9.0, including the tab-switch fix. This is maintainer-reported
+manual verification, separate from the automated Linux ARM64 results above.
 
 Two simultaneous client views and real SSH/saved-machine reconnects remain
 manual integration checks. Stateful tests cover changed focus and server scope,
